@@ -179,6 +179,15 @@ public:
 	virtual void QueryLandingPads(std::vector<int>& out_pieces) = 0;
 	virtual void BeginTransport(const CUnit* unit) = 0;
 	virtual int  QueryTransport(const CUnit* unit) = 0; // returns piece
+	
+	virtual void  PassengerDied(const CUnit* unit) = 0;
+	virtual void  PerformLoad(const CUnit* unit) = 0;
+	virtual void  PerformUnload(const CUnit* unit) = 0;
+	virtual bool  IsTransportFull() = 0; // returns bool isFull
+	virtual bool  CanTransportLoadNow() = 0; // returns bool canLoadNow
+	virtual bool  CanTransportUnloadNow() = 0; // returns bool canUnloadNow
+	virtual bool  CanTransportLoadUnit(const CUnit* unit) = 0; // returns bool canLoadUnit
+	
 	virtual void TransportPickup(const CUnit* unit) = 0;
 	virtual void TransportDrop(const CUnit* unit, const float3& pos) = 0;
 	virtual void StartBuilding(float heading, float pitch) = 0;

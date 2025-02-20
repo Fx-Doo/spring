@@ -342,6 +342,7 @@ public:
 	bool cantBeTransported;                         /// defaults to true for immobile units, false for all other unit-types
 	bool transportByEnemy;
 	int transportUnloadMethod;						///< 0 - land unload, 1 - flyover drop, 2 - land flood
+	int useGameSideTransportHandling;				///< 0 = disalbed, 1 = enabled
 	float fallSpeed;								///< dictates fall speed of all transported units
 	float unitFallSpeed;							///< sets the transported units fbi, overrides fallSpeed
 

@@ -60,6 +60,15 @@ enum {
 	COBFN_Weapon_Last,
 	COBFN_Weapon_Funcs = COBFN_Weapon_Last - COBFN_Last,
 	COBFN_NumUnitFuncs = COBFN_Last + (MAX_WEAPONS_PER_UNIT * COBFN_Weapon_Funcs),
+
+	COBFN_PerformLoad= COBFN_Weapon_Last + COBFN_NumUnitFuncs,       // in: unit->model->height*65536
+	COBFN_PerformUnload,       // in: unit->model->height*65536
+	COBFN_PassengerDied,       // in: unit->model->height*65536
+	COBFN_IsTransportFull,       // out: bool isFull,
+	COBFN_CanTransportLoadUnit,       // out: bool canLoadUnit, in: unit->model->height*65536
+	COBFN_CanTransportLoadNow,       // out: bool canLoadNow
+	COBFN_CanTransportUnloadNow,       // out: bool canUnloadNow
+
 };
 
 

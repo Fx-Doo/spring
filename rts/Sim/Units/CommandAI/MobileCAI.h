@@ -53,10 +53,14 @@ public:
 	virtual void ExecutePatrol(Command& c);
 	virtual void ExecuteMove(Command& c);
 	virtual void ExecuteLoadOnto(Command& c);
+	virtual void ExecuteCustomLoadOnto(Command& c);
 
 	virtual void ExecuteUnloadUnit(Command& c);
+	virtual void ExecuteCustomUnloadUnit(Command& c);
 	virtual void ExecuteUnloadUnits(Command& c);
+	virtual void ExecuteCustomUnloadUnits(Command& c);
 	virtual void ExecuteLoadUnits(Command& c);
+	virtual void ExecuteCustomLoadUnits(Command& c);
 
 	int GetCancelDistance() { return cancelDistance; }
 
@@ -74,9 +78,11 @@ public:
 	void UnloadUnits_Land(Command& c);
 	void UnloadUnits_Drop(Command& c);
 	void UnloadUnits_LandFlood(Command& c);
+	void CustomUnloadUnits(Command& c);
 	void UnloadLand(Command& c);
 	void UnloadDrop(Command& c);
 	void UnloadLandFlood(Command& c);
+	void CustomUnload(Command& c);
 
 	float3 lastBuggerGoalPos;
 	float3 lastUserGoal;

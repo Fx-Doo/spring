@@ -782,6 +782,42 @@ int CLuaUnitScript::QueryTransport(const CUnit* unit)
 	return RunQueryCallIn(LUAFN_QueryTransport, unit->id);
 }
 
+void CLuaUnitScript::PerformLoad(const CUnit* unit)
+{
+	ZoneScoped;
+	Call (LUAFN_PerformLoad, unit->id);
+}
+void CLuaUnitScript::PerformUnload(const CUnit* unit)
+{
+	ZoneScoped;
+	Call(LUAFN_PerformUnload, unit->id);
+}
+void CLuaUnitScript::PassengerDied(const CUnit* unit)
+{
+	ZoneScoped;
+	Call(LUAFN_PassengerDied, unit->id);
+}
+bool CLuaUnitScript::IsTransportFull()
+{
+	ZoneScoped;
+	return RunQueryCallIn(LUAFN_IsTransportFull);
+}
+bool CLuaUnitScript::CanTransportLoadUnit(const CUnit* unit)
+{
+	ZoneScoped;
+	return RunQueryCallIn(LUAFN_CanTransportLoadUnit, unit->id);
+}
+bool CLuaUnitScript::CanTransportLoadNow()
+{
+	ZoneScoped;
+	return RunQueryCallIn(LUAFN_CanTransportLoadNow);
+}
+bool CLuaUnitScript::CanTransportUnloadNow()
+{
+	ZoneScoped;
+	return RunQueryCallIn(LUAFN_CanTransportUnloadNow);
+}
+
 
 void CLuaUnitScript::TransportPickup(const CUnit* unit)
 {

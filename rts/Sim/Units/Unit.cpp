@@ -833,6 +833,7 @@ void CUnit::TransporteeKilled(const CObject* o)
 
 	const CUnit* unit = iter->unit;
 
+	script->PassengerDied(unit);
 	transportCapacityUsed -= (unit->xsize / SPRING_FOOTPRINT_SCALE);
 	transportMassUsed -= unit->mass;
 
@@ -2547,41 +2548,27 @@ bool CUnit::ScriptDecloak(const CSolidObject* object, const CWeapon* weapon)
 bool CUnit::CanTransport(const CUnit* unit) const
 {
 	RECOIL_DETAILED_TRACY_ZONE;
+	
+	// Checks left on engine side
+		
 	if (!unitDef->IsTransportUnit())
 		return false;
 	if (unit->GetTransporter() != nullptr)
 		return false;
-
-	if (!eventHandler.AllowUnitTransport(this, unit))
-		return false;
-
 	if (!unit->unitDef->transportByEnemy && !teamHandler.AlliedTeams(unit->team, team))
-		return false;
-	if (transportCapacityUsed >= unitDef->transportCapacity)
 		return false;
 	if (unit->unitDef->cantBeTransported)
 		return false;
-
+	if (unit->mass >= CSolidObject::DEFAULT_MASS || unit->beingBuilt)
+		return false;
 	// don't transport cloaked enemies
 	if (unit->isCloaked && !teamHandler.AlliedTeams(unit->team, team))
 		return false;
-
-	if (unit->xsize > (unitDef->transportSize * SPRING_FOOTPRINT_SCALE))
+	if (!eventHandler.AllowUnitTransport(this, unit))
 		return false;
-	if (unit->xsize < (unitDef->minTransportSize * SPRING_FOOTPRINT_SCALE))
-		return false;
-
-	if (unit->mass >= CSolidObject::DEFAULT_MASS || unit->beingBuilt)
-		return false;
-	if (unit->mass < unitDef->minTransportMass)
-		return false;
-	if ((unit->mass + transportMassUsed) > unitDef->transportMass)
-		return false;
-
 	if (!CanLoadUnloadAtPos(unit->pos, unit))
 		return false;
-
-	// check if <unit> is already (in)directly transporting <this>
+	
 	const CUnit* u = this;
 
 	while (u != nullptr) {
@@ -2589,7 +2576,30 @@ bool CUnit::CanTransport(const CUnit* unit) const
 			return false;
 
 		u = u->GetTransporter();
+	}	
+	// check implemented from new deftag
+	if (unitDef->useGameSideTransportHandling == 1)
+	{
+		if (!script->CanTransportLoadUnit(unit)) {
+			return false;
+		}
+		return true;
 	}
+
+	
+	// checks moved to gameSide (and AllowUnitTransport) with the new deftag
+
+
+	if (transportCapacityUsed >= unitDef->transportCapacity)
+		return false;
+	if (unit->xsize > (unitDef->transportSize * SPRING_FOOTPRINT_SCALE))
+		return false;
+	if (unit->xsize < (unitDef->minTransportSize * SPRING_FOOTPRINT_SCALE))
+		return false;
+	if (unit->mass < unitDef->minTransportMass)
+		return false;
+	if ((unit->mass + transportMassUsed) > unitDef->transportMass)
+		return false;
 
 	return true;
 }

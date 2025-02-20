@@ -352,6 +352,84 @@ int CCobInstance::QueryTransport(const CUnit* unit)
 	Call(COBFN_QueryTransport, callinArgs);
 	return callinArgs[0];
 }
+void CCobInstance::PerformLoad(const CUnit* unit)
+{
+	ZoneScoped;
+	std::array<int, 1 + MAX_COB_ARGS> callinArgs;
+
+	callinArgs[0] = 2;
+	callinArgs[1] = 0;
+	callinArgs[2] = int(unit->model->height * 65536);
+
+	Call(COBFN_PerformLoad, callinArgs);
+}
+void CCobInstance::PerformUnload(const CUnit* unit)
+{
+	ZoneScoped;
+	std::array<int, 1 + MAX_COB_ARGS> callinArgs;
+
+	callinArgs[0] = 2;
+	callinArgs[1] = 0;
+	callinArgs[2] = int(unit->model->height * 65536);
+
+	Call(COBFN_PerformUnload, callinArgs);
+}
+void CCobInstance::PassengerDied(const CUnit* unit)
+{
+	ZoneScoped;
+	std::array<int, 1 + MAX_COB_ARGS> callinArgs;
+
+	callinArgs[0] = 2;
+	callinArgs[1] = 0;
+	callinArgs[2] = int(unit->model->height * 65536);
+
+	Call(COBFN_PassengerDied, callinArgs);
+}
+bool CCobInstance::IsTransportFull()
+{
+	ZoneScoped;
+	std::array<int, 1 + MAX_COB_ARGS> callinArgs;
+
+	callinArgs[0] = 1;
+	callinArgs[1] = 0;
+
+	Call(COBFN_IsTransportFull, callinArgs);
+	return (callinArgs[0] == 1);
+}
+bool CCobInstance::CanTransportLoadUnit(const CUnit* unit)
+{
+	ZoneScoped;
+	std::array<int, 1 + MAX_COB_ARGS> callinArgs;
+
+	callinArgs[0] = 2;
+	callinArgs[1] = 1;
+	callinArgs[2] = int(unit->model->height * 65536);
+
+	Call(COBFN_CanTransportLoadUnit, callinArgs);
+	return (callinArgs[0] == 1);
+}
+bool CCobInstance::CanTransportLoadNow()
+{
+	ZoneScoped;
+	std::array<int, 1 + MAX_COB_ARGS> callinArgs;
+
+	callinArgs[0] = 1;
+	callinArgs[1] = 1;
+
+	Call(COBFN_CanTransportLoadNow, callinArgs);
+	return (callinArgs[0] == 1);
+}
+bool CCobInstance::CanTransportUnloadNow()
+{
+	ZoneScoped;
+	std::array<int, 1 + MAX_COB_ARGS> callinArgs;
+
+	callinArgs[0] = 1;
+	callinArgs[1] = 1;
+
+	Call(COBFN_CanTransportUnloadNow, callinArgs);
+	return (callinArgs[0] == 1);
+}
 
 
 void CCobInstance::TransportPickup(const CUnit* unit)

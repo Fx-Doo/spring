@@ -38,6 +38,13 @@ void CLuaUnitScriptNames::InitScriptNames()
 	scriptNames[LUAFN_Landed]               = "Landed";
 	scriptNames[LUAFN_BeginTransport]       = "BeginTransport";
 	scriptNames[LUAFN_QueryTransport]       = "QueryTransport";
+	scriptNames[LUAFN_PerformLoad]       = "PerformLoad";
+	scriptNames[LUAFN_PerformUnload]       = "PerformUnload";
+	scriptNames[LUAFN_PassengerDied]       = "PassengerDied";
+	scriptNames[LUAFN_IsTransportFull]       = "IsTransportFull";
+	scriptNames[LUAFN_CanTransportLoadUnit]       = "CanTransportLoadUnit";
+	scriptNames[LUAFN_CanTransportLoadNow]       = "CanTransportLoadNow";
+	scriptNames[LUAFN_CanTransportUnloadNow]       = "CanTransportUnloadNow";
 	scriptNames[LUAFN_TransportPickup]      = "TransportPickup";
 	scriptNames[LUAFN_StartUnload]          = "StartUnload";
 	scriptNames[LUAFN_EndTransport]         = "EndTransport";

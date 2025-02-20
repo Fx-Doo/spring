@@ -216,6 +216,7 @@ UnitDef::UnitDef()
 	, cantBeTransported(false)
 	, transportByEnemy(false)
 	, transportUnloadMethod(0)
+	, useGameSideTransportHandling(0)
 	, fallSpeed(0.0f)
 	, unitFallSpeed(0.0f)
 	, startCloaked(false)
@@ -530,6 +531,7 @@ UnitDef::UnitDef(const LuaTable& udTable, const std::string& unitName, int id)
 	fallSpeed         = udTable.GetFloat("fallSpeed",    0.2f);
 	unitFallSpeed     = udTable.GetFloat("unitFallSpeed",  0);
 	transportUnloadMethod = udTable.GetInt("transportUnloadMethod" , 0);
+	useGameSideTransportHandling = udTable.GetInt("useGameSideTransportHandling" , 0);
 
 	wingDrag     = udTable.GetFloat("wingDrag",     0.07f);  // drag caused by wings
 	wingDrag     = std::clamp(wingDrag, 0.0f, 1.0f);

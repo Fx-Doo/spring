@@ -99,6 +99,13 @@ public:
 	void QueryLandingPads(std::vector<int>& out_pieces) override;
 	void BeginTransport(const CUnit* unit) override;
 	int  QueryTransport(const CUnit* unit) override;
+	void  PassengerDied(const CUnit* unit) override;
+	void  PerformLoad(const CUnit* unit) override;
+	void  PerformUnload(const CUnit* unit) override;
+	bool  IsTransportFull() override;
+	bool  CanTransportLoadNow() override;
+	bool  CanTransportUnloadNow() override;
+	bool  CanTransportLoadUnit(const CUnit* unit) override;
 	void TransportPickup(const CUnit* unit) override;
 	void TransportDrop(const CUnit* unit, const float3& pos) override;
 	void StartBuilding(float heading, float pitch) override;

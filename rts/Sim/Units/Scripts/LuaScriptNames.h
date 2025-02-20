@@ -55,7 +55,16 @@ enum {
 	LUAFN_BlockShot,     // ( targetUnitID, haveUserTarget ) -> boolean
 	LUAFN_TargetWeight,  // ( targetUnitID ) -> number targetWeight
 
+	LUAFN_PerformLoad,       // ( passengerID ) -> nil
+	LUAFN_PerformUnload,       // ( passengerID ) -> nil
+	LUAFN_PassengerDied,       // ( passengerID ) -> nil
+	LUAFN_IsTransportFull,       // (  ) -> bool isFull
+	LUAFN_CanTransportLoadNow,       // (  ) -> bool canLoadNow
+	LUAFN_CanTransportUnloadNow,       // (  ) -> bool canUnloadNow
+	LUAFN_CanTransportLoadUnit,       // ( passengerID ) -> bool canLoadUnit
+	
 	LUAFN_Last,
+	
 };
 
 
