@@ -782,16 +782,23 @@ int CLuaUnitScript::QueryTransport(const CUnit* unit)
 	return RunQueryCallIn(LUAFN_QueryTransport, unit->id);
 }
 
-void CLuaUnitScript::PerformLoad(const CUnit* unit)
-{
-	ZoneScoped;
-	Call (LUAFN_PerformLoad, unit->id);
+// void CLuaUnitScript::PerformLoad(const CUnit* unit)
+// {
+	// ZoneScoped;
+	// Call (LUAFN_PerformLoad, unit->id);
+// }
+// void CLuaUnitScript::PerformUnload(const CUnit* unit)
+// {
+	// ZoneScoped;
+	// Call(LUAFN_PerformUnload, unit->id);
+// }
+
+void CLuaUnitScript::EndTransport(const CUnit* unit) 
+{ 
+	ZoneScoped; 
+	Call(LUAFN_EndTransport, unit->id); 
 }
-void CLuaUnitScript::PerformUnload(const CUnit* unit)
-{
-	ZoneScoped;
-	Call(LUAFN_PerformUnload, unit->id);
-}
+
 void CLuaUnitScript::PassengerDied(const CUnit* unit)
 {
 	ZoneScoped;
@@ -1019,7 +1026,6 @@ void CLuaUnitScript::StartSkidding(const float3& vel) { ZoneScoped; Call(LUAFN_S
 void CLuaUnitScript::StopSkidding() { ZoneScoped; Call(LUAFN_StopSkidding); }
 void CLuaUnitScript::ChangeHeading(short deltaHeading) { ZoneScoped; Call(LUAFN_ChangeHeading, deltaHeading * 1.0f); }
 void CLuaUnitScript::StartUnload() { ZoneScoped; Call(LUAFN_StartUnload); }
-void CLuaUnitScript::EndTransport() { ZoneScoped; Call(LUAFN_EndTransport); }
 void CLuaUnitScript::StartBuilding() { ZoneScoped; Call(LUAFN_StartBuilding); }
 void CLuaUnitScript::StopBuilding() { ZoneScoped; Call(LUAFN_StopBuilding); }
 void CLuaUnitScript::Falling() { ZoneScoped; Call(LUAFN_Falling); }

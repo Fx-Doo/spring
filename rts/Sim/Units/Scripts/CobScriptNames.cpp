@@ -45,8 +45,8 @@ void CCobUnitScriptNames::InitScriptNames()
 	scriptNames[COBFN_TransportPickup]      = "TransportPickup";
 	scriptNames[COBFN_StartUnload]          = "StartUnload";
 	scriptNames[COBFN_EndTransport]         = "EndTransport";
-	scriptNames[COBFN_PerformLoad]         = "PerformLoad";
-	scriptNames[COBFN_PerformUnload]         = "PerformUnload";
+//	scriptNames[COBFN_PerformLoad]         = "PerformLoad";
+//	scriptNames[COBFN_PerformUnload]         = "PerformUnload";
 	scriptNames[COBFN_PassengerDied]         = "PassengerDied";
 	scriptNames[COBFN_IsTransportFull]         = "IsTransportFull";
 	scriptNames[COBFN_CanTransportLoadNow]         = "CanTransportLoadNow";

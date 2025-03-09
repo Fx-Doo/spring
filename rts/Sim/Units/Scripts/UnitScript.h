@@ -181,8 +181,8 @@ public:
 	virtual int  QueryTransport(const CUnit* unit) = 0; // returns piece
 	
 	virtual void  PassengerDied(const CUnit* unit) = 0;
-	virtual void  PerformLoad(const CUnit* unit) = 0;
-	virtual void  PerformUnload(const CUnit* unit) = 0;
+//	virtual void  PerformLoad(const CUnit* unit) = 0;
+//	virtual void  PerformUnload(const CUnit* unit) = 0;
 	virtual bool  IsTransportFull() = 0; // returns bool isFull
 	virtual bool  CanTransportLoadNow() = 0; // returns bool canLoadNow
 	virtual bool  CanTransportUnloadNow() = 0; // returns bool canUnloadNow
@@ -201,7 +201,7 @@ public:
 	virtual void StopSkidding() = 0;
 	virtual void ChangeHeading(short deltaHeading) = 0;
 	virtual void StartUnload() = 0;
-	virtual void EndTransport() = 0;
+	virtual void EndTransport(const CUnit* unit) = 0;
 	virtual void StartBuilding() = 0;
 	virtual void StopBuilding() = 0;
 	virtual void Falling() = 0;

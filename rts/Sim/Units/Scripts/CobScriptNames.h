@@ -37,7 +37,7 @@ enum {
 	COBFN_QueryTransport,       // out: piecenum, in: unit->model->height*65536
 	COBFN_TransportPickup,      // in: unit->id
 	COBFN_StartUnload,          // -
-	COBFN_EndTransport,         // -
+	COBFN_EndTransport,         // in: unit->model->height*65536
 	COBFN_TransportDrop,        // in: unit->id, in: PACKXZ(pos.x, pos.z)
 	COBFN_SetMaxReloadTime,     // in: maxReloadTime
 	COBFN_StartBuilding,        // BUILDER: in: h-heading, in: p-pitch; FACTORY: -
@@ -61,9 +61,9 @@ enum {
 	COBFN_Weapon_Funcs = COBFN_Weapon_Last - COBFN_Last,
 	COBFN_NumUnitFuncs = COBFN_Last + (MAX_WEAPONS_PER_UNIT * COBFN_Weapon_Funcs),
 
-	COBFN_PerformLoad= COBFN_Weapon_Last + COBFN_NumUnitFuncs,       // in: unit->model->height*65536
-	COBFN_PerformUnload,       // in: unit->model->height*65536
-	COBFN_PassengerDied,       // in: unit->model->height*65536
+//	COBFN_PerformLoad= COBFN_Weapon_Last + COBFN_NumUnitFuncs,       // in: unit->model->height*65536
+//	COBFN_PerformUnload,       // in: unit->model->height*65536
+	COBFN_PassengerDied = COBFN_Weapon_Last + COBFN_NumUnitFuncs,       // in: unit->model->height*65536
 	COBFN_IsTransportFull,       // out: bool isFull,
 	COBFN_CanTransportLoadUnit,       // out: bool canLoadUnit, in: unit->model->height*65536
 	COBFN_CanTransportLoadNow,       // out: bool canLoadNow

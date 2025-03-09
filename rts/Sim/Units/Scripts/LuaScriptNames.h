@@ -35,7 +35,7 @@ enum {
 	LUAFN_QueryTransport,       // ( passengerID ) -> number piece
 	LUAFN_TransportPickup,      // ( passengerID ) -> nil
 	LUAFN_StartUnload,          // ( ) -> nil
-	LUAFN_EndTransport,         // ( ) -> nil
+	LUAFN_EndTransport,         // ( passengerID ) -> nil
 	LUAFN_TransportDrop,        // ( passengerID, x, y, z ) -> nil
 	LUAFN_StartBuilding,        // BUILDER: ( h-heading, p-pitch ) -> nil ; FACTORY: ( ) -> nil
 	LUAFN_StopBuilding,         // ( ) -> nil
@@ -55,8 +55,8 @@ enum {
 	LUAFN_BlockShot,     // ( targetUnitID, haveUserTarget ) -> boolean
 	LUAFN_TargetWeight,  // ( targetUnitID ) -> number targetWeight
 
-	LUAFN_PerformLoad,       // ( passengerID ) -> nil
-	LUAFN_PerformUnload,       // ( passengerID ) -> nil
+//	LUAFN_PerformLoad,       // ( passengerID ) -> nil
+//	LUAFN_PerformUnload,       // ( passengerID ) -> nil
 	LUAFN_PassengerDied,       // ( passengerID ) -> nil
 	LUAFN_IsTransportFull,       // (  ) -> bool isFull
 	LUAFN_CanTransportLoadNow,       // (  ) -> bool canLoadNow

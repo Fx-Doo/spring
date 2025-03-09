@@ -352,28 +352,41 @@ int CCobInstance::QueryTransport(const CUnit* unit)
 	Call(COBFN_QueryTransport, callinArgs);
 	return callinArgs[0];
 }
-void CCobInstance::PerformLoad(const CUnit* unit)
+// void CCobInstance::PerformLoad(const CUnit* unit)
+// {
+	// ZoneScoped;
+	// std::array<int, 1 + MAX_COB_ARGS> callinArgs;
+
+	// callinArgs[0] = 2;
+	// callinArgs[1] = 0;
+	// callinArgs[2] = int(unit->model->height * 65536);
+
+	// Call(COBFN_PerformLoad, callinArgs);
+// }
+// void CCobInstance::PerformUnload(const CUnit* unit)
+// {
+	// ZoneScoped;
+	// std::array<int, 1 + MAX_COB_ARGS> callinArgs;
+
+	// callinArgs[0] = 2;
+	// callinArgs[1] = 0;
+	// callinArgs[2] = int(unit->model->height * 65536);
+
+	// Call(COBFN_PerformUnload, callinArgs);
+// }
+
+void CCobInstance::EndTransport(const CUnit* unit)
 {
-	ZoneScoped;
+	ZoneScoped; 
 	std::array<int, 1 + MAX_COB_ARGS> callinArgs;
 
 	callinArgs[0] = 2;
 	callinArgs[1] = 0;
 	callinArgs[2] = int(unit->model->height * 65536);
 
-	Call(COBFN_PerformLoad, callinArgs);
+	Call(COBFN_EndTransport, callinArgs); 
 }
-void CCobInstance::PerformUnload(const CUnit* unit)
-{
-	ZoneScoped;
-	std::array<int, 1 + MAX_COB_ARGS> callinArgs;
 
-	callinArgs[0] = 2;
-	callinArgs[1] = 0;
-	callinArgs[2] = int(unit->model->height * 65536);
-
-	Call(COBFN_PerformUnload, callinArgs);
-}
 void CCobInstance::PassengerDied(const CUnit* unit)
 {
 	ZoneScoped;
@@ -594,7 +607,6 @@ void CCobInstance::Destroy() { ZoneScoped; Call(COBFN_Destroy); }
 void CCobInstance::StartMoving(bool reversing) { ZoneScoped; Call(COBFN_StartMoving, reversing); }
 void CCobInstance::StopMoving() { ZoneScoped; Call(COBFN_StopMoving); }
 void CCobInstance::StartUnload() { ZoneScoped; Call(COBFN_StartUnload); }
-void CCobInstance::EndTransport() { ZoneScoped; Call(COBFN_EndTransport); }
 void CCobInstance::StartBuilding() { ZoneScoped; Call(COBFN_StartBuilding); }
 void CCobInstance::StopBuilding() { ZoneScoped; Call(COBFN_StopBuilding); }
 void CCobInstance::Falling() { ZoneScoped; Call(COBFN_Falling); }

@@ -1674,7 +1674,7 @@ void CMobileCAI::ExecuteCustomLoadUnits(Command& c)
 						am->SetAllowLanding(false);
 						am->SetWantedAltitude(0.0f);
 
-						owner->script->PerformLoad(unit);
+						owner->script->BeginTransport(unit);
 						SetTransportee(nullptr);
 
 						StopMoveAndFinishCommand();
@@ -2212,7 +2212,7 @@ void CMobileCAI::CustomUnloadUnits(Command& c)
             transportee = tu.unit;
 
             if (transportee != nullptr) {
-                    transportee->id, startingDropPos.x, startingDropPos.y, startingDropPos.z);
+                    // transportee->id, startingDropPos.x, startingDropPos.y, startingDropPos.z);
 
                 Command c2(CMD_UNLOAD_UNIT, c.GetOpts() | INTERNAL_ORDER, startingDropPos);
                 c2.PushParam(transportee->id);
@@ -2312,7 +2312,7 @@ void CMobileCAI::UnloadLand(Command& c)
 
 			if (transportees.empty()) {
 				am->SetAllowLanding(true);
-				owner->script->EndTransport();
+				owner->script->EndTransport(transportee);
 			}
 		}
 
@@ -2345,7 +2345,7 @@ void CMobileCAI::UnloadDrop(Command& c)
 		if (owner->pos.SqDistance2D(pos) < Square(40.0f) || (((pos - owner->pos).Normalize()).SqDistance(owner->frontdir) > 0.25 && owner->pos.SqDistance2D(pos)< (205*205))) {
 			am->SetAllowLanding(false);
 
-			owner->script->EndTransport();
+			owner->script->EndTransport(transportee);
 			owner->DetachUnitFromAir(transportee, pos);
 
 			FinishCommand();
@@ -2401,7 +2401,7 @@ void CMobileCAI::UnloadLandFlood(Command& c)
 
 				if (transportees.empty()) {
 					am->SetAllowLanding(true);
-					owner->script->EndTransport();
+					owner->script->EndTransport(transportee);
 					am->UpdateLanded();
 				}
 			}
@@ -2414,7 +2414,7 @@ void CMobileCAI::UnloadLandFlood(Command& c)
 			owner->DetachUnitFromAir(transportee, wantedPos);
 
 			if (transportees.empty()) {
-				owner->script->EndTransport();
+				owner->script->EndTransport(transportee);
 			}
 		}
 	}
@@ -2445,7 +2445,7 @@ void CMobileCAI::CustomUnload(Command& c)
 			if (!owner->script->CanTransportUnloadNow())
 				return;
 
-			owner->script->PerformUnload(transportee);
+			owner->script->EndTransport(transportee);
 			FinishCommand();
 		}
 	} else {

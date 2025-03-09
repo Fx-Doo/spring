@@ -100,8 +100,8 @@ public:
 	void BeginTransport(const CUnit* unit) override;
 	int  QueryTransport(const CUnit* unit) override;
 	void  PassengerDied(const CUnit* unit) override;
-	void  PerformLoad(const CUnit* unit) override;
-	void  PerformUnload(const CUnit* unit) override;
+//	void  PerformLoad(const CUnit* unit) override;
+//	void  PerformUnload(const CUnit* unit) override;
 	bool  IsTransportFull() override;
 	bool  CanTransportLoadNow() override;
 	bool  CanTransportUnloadNow() override;
@@ -119,7 +119,7 @@ public:
 	void StopSkidding() override;
 	void ChangeHeading(short deltaHeading) override;
 	void StartUnload() override;
-	void EndTransport() override;
+	void EndTransport(const CUnit* unit) override;
 	void StartBuilding() override;
 	void StopBuilding() override;
 	void Falling() override;
