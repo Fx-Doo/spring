@@ -524,6 +524,13 @@ void* LuaUtils::GetUserData(lua_State* L, int index, const string& type)
 /******************************************************************************/
 /******************************************************************************/
 
+/***
+ * @function Script.IsEngineMinVersion
+ * @param minMajorVer integer
+ * @param minMinorVer integer? (Default: `0`)
+ * @param minCommits integer? (Default: `0`)
+ * @return boolean satisfiesMin `true` if the engine version is greater or equal to the specified version, otherwise `false`.
+ */
 int LuaUtils::IsEngineMinVersion(lua_State* L)
 {
 	const int minMajorVer = luaL_checkint(L, 1);
@@ -921,6 +928,22 @@ void LuaUtils::PushCommandParamsTable(lua_State* L, const Command& cmd, bool sub
 		lua_rawset(L, -3);
 }
 
+/***
+ * Full command options object for reading from a `Command`.
+ * 
+ * Note that this has extra fields `internal` and `coded` that are not supported
+ * when creating a command from Lua.
+ * 
+ * @class CommandOptions
+ * @field coded CommandOptionBit|integer Bitmask of command options.
+ * @field alt boolean Alt key pressed.
+ * @field ctrl boolean Ctrl key pressed.
+ * @field shift boolean Shift key pressed.
+ * @field right boolean Right mouse key pressed.
+ * @field meta boolean Meta key (space) pressed.
+ * @field internal boolean
+ */
+
 void LuaUtils::PushCommandOptionsTable(lua_State* L, const Command& cmd, bool subtable)
 {
 	if (subtable)
@@ -954,6 +977,32 @@ int LuaUtils::PushUnitAndCommand(lua_State* L, const CUnit* unit, const Command&
 	return 7;
 }
 
+/***
+ * @alias CommandOptionBit
+ * | 4 # Meta (windows/mac/mod4) key.
+ * | 8 # Internal order.
+ * | 16 # Right mouse key.
+ * | 32 # Shift key.
+ * | 64 # Control key.
+ * | 128 # Alt key.
+ */
+
+/***
+ * @alias CommandOptionName
+ * | "right" # Right mouse key.
+ * | "alt" # Alt key.
+ * | "ctrl" # Control key.
+ * | "shift" # Shift key.
+ * | "meta" # Meta key (space).
+ */
+
+/***
+ * @alias CreateCommandOptions
+ * | CommandOptionName[] # An array of option names.
+ * | table<CommandOptionName, boolean> # A map of command names to booleans, considered held when `true`.
+ * | CommandOptionBit # A specific integer value for a command option.
+ * | integer # A bit mask combination of `CommandOptionBit` values. Pass `0` for no options.
+ */
 
 static bool ParseCommandOptions(
 	lua_State* L,
@@ -1046,6 +1095,21 @@ static bool ParseCommandTimeOut(
 	return true;
 }
 
+/***
+ * @alias CreateCommandParams
+ * | number[] # An array of parameters.
+ * | number # A single parameter.
+ */
+
+/** - not documented.
+ * 
+ * Supports the following params, starting from `idx`.
+ * 
+ * @param cmdID CMD|integer The command ID.
+ * @param params CreateCommandParams? Parameters for the given command.
+ * @param options CreateCommandOptions?
+ * @param timeout integer?
+ */
 Command LuaUtils::ParseCommand(lua_State* L, const char* caller, int idIndex)
 {
 	// cmdID
@@ -1084,6 +1148,15 @@ Command LuaUtils::ParseCommand(lua_State* L, const char* caller, int idIndex)
 	return cmd;
 }
 
+/***
+ * Used when assigning multiple commands at once.
+ * 
+ * @class CreateCommand
+ * @field [1] CMD|integer Command ID.
+ * @field [2] CreateCommandParams? Parameters for the given command.
+ * @field [3] CreateCommandOptions? Command options.
+ * @field [4] integer? Timeout.
+ */
 
 Command LuaUtils::ParseCommandTable(lua_State* L, const char* caller, int tableIdx)
 {
@@ -1157,6 +1230,10 @@ void LuaUtils::ParseCommandArray(
 }
 
 /***
+ * Facing direction represented by a string or number.
+ * 
+ * @see FacingInteger
+ * 
  * @alias Facing
  * | 0 # South
  * | 1 # East
@@ -1181,11 +1258,10 @@ int LuaUtils::ParseFacing(lua_State* L, const char* caller, int index)
 		const char* dir = lua_tostring(L, index);
 
 		switch (dir[0]) {
-			case 'S': case 's': { return 0; } break;
-			case 'E': case 'e': { return 1; } break;
-			case 'N': case 'n': { return 2; } break;
-			case 'W': case 'w': { return 3; } break;
-			default           : {           } break;
+			case 'S': case 's': return FACING_SOUTH;
+			case 'E': case 'e': return FACING_EAST;
+			case 'N': case 'n': return FACING_NORTH;
+			case 'W': case 'w': return FACING_WEST;
 		}
 
 		luaL_error(L, "%s(): bad facing string \"%s\"", caller, dir);
@@ -1309,12 +1385,34 @@ static void LogMsg(lua_State* L, const char* logSection, int logLevel, int argIn
 }
 
 
+/***
+ * Prints values in the spring chat console. Useful for debugging.
+ * 
+ * Hint: the default print() writes to STDOUT.
+ *
+ * @function Spring.Echo
+ * @param arg any
+ * @param ... any
+ *
+ * @return nil
+ */
 int LuaUtils::Echo(lua_State* L)
 {
 	LogMsg(L, nullptr, -1, 1);
 	return 0;
 }
 
+/***
+ * @enum LOG
+ * @see Spring.Log
+ * @field DEBUG 20
+ * @field INFO 30
+ * @field NOTICE 35 Engine default.
+ * @field DEPRECATED 37
+ * @field WARNING 40
+ * @field ERROR 50
+ * @field FATAL 60
+ */
 
 bool LuaUtils::PushLogEntries(lua_State* L)
 {
@@ -1328,6 +1426,18 @@ bool LuaUtils::PushLogEntries(lua_State* L)
 	PUSH_LOG_LEVEL(FATAL);
 	return true;
 }
+
+/***
+ * @alias LogLevel
+ * | integer
+ * | "debug"      # LOG.DEBUG
+ * | "info"       # LOG.INFO
+ * | "notice"     # LOG.NOTICE (engine default)
+ * | "warning"    # LOG.WARNING
+ * | "deprecated" # LOG.DEPRECATED
+ * | "error"      # LOG.ERROR
+ * | "fatal"      # LOG.FATAL
+ */
 
 int LuaUtils::ParseLogLevel(lua_State* L, int index)
 {
@@ -1355,13 +1465,14 @@ int LuaUtils::ParseLogLevel(lua_State* L, int index)
 	return -1;
 }
 
-/*-
-	Logs a msg to the logfile / console
-	@param loglevel loglevel that will be used for the message
-	@param msg string to be logged
-	@fn Spring.Log(string logsection, int loglevel, ...)
-	@fn Spring.Log(string logsection, string loglevel, ...)
-*/
+/***
+ * Logs a message to the logfile/console.
+ * 
+ * @function Spring.Log
+ * @param section string
+ * @param logLevel (LogLevel|LOG)? (Default: `"notice"`)
+ * @param ... string messages
+ */
 int LuaUtils::Log(lua_State* L)
 {
 	const int args = lua_gettop(L); // number of arguments
@@ -1455,6 +1566,27 @@ void LuaUtils::PushStringVector(lua_State* L, const vector<string>& vec)
 
 /******************************************************************************/
 /******************************************************************************/
+
+/***
+ * Command Description
+ * 
+ * Contains data about a command.
+ * 
+ * @class CommandDescription
+ * @field id (CMD|integer)?
+ * @field type CMDTYPE?
+ * @field name string?
+ * @field action string?
+ * @field tooltip string?
+ * @field texture string?
+ * @field cursor string?
+ * @field queueing boolean?
+ * @field hidden boolean?
+ * @field disabled boolean?
+ * @field showUnique boolean?
+ * @field onlyTexture boolean?
+ * @field params string[]?
+ */
 
 void LuaUtils::PushCommandDesc(lua_State* L, const SCommandDescription& cd)
 {

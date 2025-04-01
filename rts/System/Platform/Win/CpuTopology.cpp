@@ -35,26 +35,38 @@ namespace spring_overrides {
 		RelationAll = 0xffff
 		} LOGICAL_PROCESSOR_RELATIONSHIP;
 
-	typedef struct _PROCESSOR_RELATIONSHIP {
+	typedef struct {
 		BYTE Flags;
 		BYTE EfficiencyClass;
 		BYTE Reserved[20];
 		WORD GroupCount;
 		GROUP_AFFINITY GroupMask[ANYSIZE_ARRAY];
-		} PROCESSOR_RELATIONSHIP,*PPROCESSOR_RELATIONSHIP;
+	} PROCESSOR_RELATIONSHIP,*PPROCESSOR_RELATIONSHIP;
 
-	struct _SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX {
+	typedef struct {
+		BYTE                 Level;
+		BYTE                 Associativity;
+		WORD                 LineSize;
+		DWORD                CacheSize;
+		PROCESSOR_CACHE_TYPE Type;
+		BYTE                 Reserved[18];
+		WORD                 GroupCount;
+		union {
+		  GROUP_AFFINITY GroupMask;
+		  GROUP_AFFINITY GroupMasks[ANYSIZE_ARRAY];
+		} DUMMYUNIONNAME;
+	} CACHE_RELATIONSHIP, *PCACHE_RELATIONSHIP;
+
+	typedef struct _SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX {
 		LOGICAL_PROCESSOR_RELATIONSHIP Relationship;
-		DWORD Size;
-		__C89_NAMELESS union {
+		DWORD                          Size;
+		union {
 			PROCESSOR_RELATIONSHIP Processor;
-			//NUMA_NODE_RELATIONSHIP NumaNode;
-			//CACHE_RELATIONSHIP Cache;
-			//GROUP_RELATIONSHIP Group;
-		};
-		};
-
-		typedef struct _SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX, *PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX;
+			NUMA_NODE_RELATIONSHIP NumaNode;
+			CACHE_RELATIONSHIP     Cache;
+			GROUP_RELATIONSHIP     Group;
+		} DUMMYUNIONNAME;
+	} SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX, *PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX;
 	
 	#if _WIN32_WINNT >= 0x0601
 	typedef BOOL (WINAPI *GetLogicalProcessorInformationExFunc)(
@@ -66,15 +78,14 @@ namespace spring_overrides {
 }
 
 
-ProcessorMasks GetProcessorMasks() {
+BOOL GetProcessorInformation
+	( spring_overrides::PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX& buffer
+	, DWORD& returnLength
+	, cpu_topology::spring_overrides::LOGICAL_PROCESSOR_RELATIONSHIP queryRelationshipType
+	)
+{
 	spring_overrides::GetLogicalProcessorInformationExFunc Local_GetLogicalProcessorInformationEx;
-	spring_overrides::PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX buffer = NULL;
-	spring_overrides::PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX ptr = NULL;
-	DWORD returnLength = 0;
-	DWORD byteOffset = 0;
 	BOOL done = FALSE;
-	BYTE performanceClass = 0;
-	ProcessorMasks processorMasks;
 
 	Local_GetLogicalProcessorInformationEx = (spring_overrides::GetLogicalProcessorInformationExFunc) GetProcAddress(
 		GetModuleHandle(TEXT("kernel32")),
@@ -82,12 +93,12 @@ ProcessorMasks GetProcessorMasks() {
 	if (NULL == Local_GetLogicalProcessorInformationEx)
 	{
 		LOG("GetLogicalProcessorInformation is not supported.\n");
-		return processorMasks;
+		return FALSE;
 	}
 
 	while (!done)
 	{
-		DWORD rc = Local_GetLogicalProcessorInformationEx(spring_overrides::RelationProcessorCore, buffer, &returnLength);
+		DWORD rc = Local_GetLogicalProcessorInformationEx(queryRelationshipType, buffer, &returnLength);
 
 		if (FALSE == rc)
 		{
@@ -99,13 +110,27 @@ ProcessorMasks GetProcessorMasks() {
 				buffer = (spring_overrides::PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)malloc(returnLength);
 
 				if (NULL == buffer)
-					return processorMasks;
+					return FALSE;
 			}
 			else
-				return processorMasks;
+				return FALSE;
 		}
 		else
 			done = TRUE;
+	}
+	return TRUE;
+}
+
+ProcessorMasks GetProcessorMasks() {
+	spring_overrides::PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX buffer = NULL;
+	spring_overrides::PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX ptr = NULL;
+	DWORD returnLength = 0;
+	DWORD byteOffset = 0;
+	BYTE performanceClass = 0;
+	ProcessorMasks processorMasks;
+
+	if (GetProcessorInformation(buffer, returnLength, spring_overrides::RelationProcessorCore) == FALSE){
+		return processorMasks;
 	}
 
 	// The number of EfficiencyClass values depends on the processor.The highest numbered class is always the
@@ -123,6 +148,7 @@ ProcessorMasks GetProcessorMasks() {
 		ptr = (spring_overrides::PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)(((char*)buffer) + byteOffset);
 	}
 
+	// Now collect the logical processor masks.
 	ptr = buffer;
 	byteOffset = 0;
 	while (byteOffset < returnLength)
@@ -156,6 +182,49 @@ ProcessorMasks GetProcessorMasks() {
 		free(buffer);
 
 	return processorMasks;
+}
+
+// Notes. We're only interested in L3 cache sizes at the moment becasue we're only using this
+// information to find a performance core with the most cache to pin the main thread to.
+ProcessorCaches GetProcessorCache() {
+	spring_overrides::PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX buffer = NULL;
+	spring_overrides::PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX ptr = NULL;
+	DWORD returnLength = 0;
+	DWORD byteOffset = 0;
+	ProcessorCaches processorCaches;
+
+	if (GetProcessorInformation(buffer, returnLength, spring_overrides::RelationCache) == FALSE) {
+		return processorCaches;
+	}
+
+	ptr = buffer;
+	byteOffset = 0;
+	while (byteOffset < returnLength)
+	{
+		if (ptr->Relationship == spring_overrides::RelationCache && ptr->Cache.Level == 3)
+		{
+			const uint32_t supportedMask = static_cast<uint32_t>(ptr->Cache.GroupMasks[0].Mask);
+			if (supportedMask == 0) {
+				LOG("Info: Processor group %d has a thread mask outside of the supported range."
+					, int(ptr->Processor.GroupCount));
+				break;
+			}
+
+			ProcessorGroupCaches groupCache;
+			groupCache.groupMask = supportedMask;
+			groupCache.cacheSizes[ptr->Cache.Level - 1] = ptr->Cache.CacheSize;
+
+			processorCaches.groupCaches.push_back(groupCache);
+		}
+
+		byteOffset += ptr->Size;
+		ptr = (spring_overrides::PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)(((char*)buffer) + byteOffset);
+	}
+
+	if (buffer)
+		free(buffer);
+
+	return processorCaches;
 }
 
 } //namespace cpu_topology

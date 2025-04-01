@@ -403,31 +403,6 @@ public:
 	}
 };
 
-
-
-class AdvModelShadingActionExecutor : public IUnsyncedActionExecutor {
-public:
-	AdvModelShadingActionExecutor() : IUnsyncedActionExecutor("AdvModelShading",
-			"Control advanced model shading mode",
-			false, {
-			{"", "Toggles advanced model shading mode"},
-			{"<on|off>", "Set advanced model shading mode <on|off>"},
-			}) {}
-
-	bool Execute(const UnsyncedAction& action) const {
-		static bool canUseShaders = unitDrawer->UseAdvShading();
-
-		if (!canUseShaders)
-			return false;
-
-		InverseOrSetBool(unitDrawer->UseAdvShadingRef(), action.GetArgs());
-		LogSystemStatus("model shaders", unitDrawer->UseAdvShading());
-		return true;
-	}
-};
-
-
-
 class AdvMapShadingActionExecutor : public IUnsyncedActionExecutor {
 public:
 	AdvMapShadingActionExecutor() : IUnsyncedActionExecutor("AdvMapShading",
@@ -1579,15 +1554,25 @@ public:
 	DebugGLActionExecutor() : IUnsyncedActionExecutor("DebugGL", "Enable/Disable OpenGL debug-context output") {}
 
 	bool Execute(const UnsyncedAction& action) const final {
-		bool enabled = !globalRendering->glDebug;
+		bool debugEnabled = !globalRendering->glDebug;
+
 		uint32_t msgSrceIdx = 0;
 		uint32_t msgTypeIdx = 0;
 		uint32_t msgSevrIdx = 0;
 
 		auto args = CSimpleParser::Tokenize(action.GetArgs());
 
-		if (args.size() > 0)
-			enabled = StringToBool(args[0]);
+		if (args.size() > 0) {
+			int options = StringToInt(args[0]);
+			if (options > 1) {
+				debugEnabled = !!(options & (1 << 1));
+				configHandler->Set("DebugGLReportGroups", !!(options & (1 << 2)), true);
+				configHandler->Set("DebugGLStacktraces",  !!(options & (1 << 3)), true);
+			}
+			else {
+				debugEnabled = !!(options & 1);
+			}
+		}
 
 		if (args.size() > 1)
 			msgSrceIdx = StringToInt(args[1]);
@@ -1596,7 +1581,7 @@ public:
 		if (args.size() > 3)
 			msgSevrIdx = StringToInt(args[3]);
 
-		globalRendering->glDebug = enabled;
+		globalRendering->glDebug = debugEnabled;
 		globalRendering->ToggleGLDebugOutput(msgSrceIdx, msgTypeIdx, msgSevrIdx);
 
 		return true;
@@ -1928,6 +1913,28 @@ public:
 	}
 };
 
+class RotateSkyActionExecutor : public IUnsyncedActionExecutor {
+public:
+	RotateSkyActionExecutor() : IUnsyncedActionExecutor("RotateSky",
+		"Rotates the sky around axis by angle") {
+	}
+
+	bool Execute(const UnsyncedAction& action) const final {
+		auto args = CSimpleParser::Tokenize(action.GetArgs());
+		if (args.size() != 4)
+			return false;
+
+		const auto axisAngle = float4{
+			StringToInt<float>(args[0]),
+			StringToInt<float>(args[1]),
+			StringToInt<float>(args[2]),
+			StringToInt<float>(args[3])
+		};
+
+		ISky::GetSky()->SetSkyAxisAngle(axisAngle);
+		return true;
+	}
+};
 
 class FeatureFadeDistActionExecutor : public IUnsyncedActionExecutor {
 public:
@@ -3917,7 +3924,6 @@ void UnsyncedGameCommands::AddDefaultActionExecutors()
 	AddActionExecutor(AllocActionExecutor<MapMeshDrawerActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<MapBorderActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<WaterActionExecutor>());
-	AddActionExecutor(AllocActionExecutor<AdvModelShadingActionExecutor>()); // [maint]
 	AddActionExecutor(AllocActionExecutor<AdvMapShadingActionExecutor>()); // [maint]
 	AddActionExecutor(AllocActionExecutor<UnitDrawerTypeActionExecutor>()); // [maint]
 	AddActionExecutor(AllocActionExecutor<FeatureDrawerTypeActionExecutor>()); // [maint]
@@ -4007,6 +4013,7 @@ void UnsyncedGameCommands::AddDefaultActionExecutors()
 	AddActionExecutor(AllocActionExecutor<GroundDetailActionExecutor>());
 	// [devel] AddActionExecutor(AllocActionExecutor<MoreGrassActionExecutor>());
 	// [devel] AddActionExecutor(AllocActionExecutor<LessGrassActionExecutor>());
+	// [devel] AddActionExecutor(AllocActionExecutor<RotateSkyActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<FeatureFadeDistActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<FeatureDrawDistActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<SpeedUpActionExecutor>());

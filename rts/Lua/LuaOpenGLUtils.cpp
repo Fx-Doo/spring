@@ -9,7 +9,6 @@
 #include "LuaAtlasTextures.h"
 #include "Game/Camera.h"
 #include "Map/BaseGroundDrawer.h"
-#include "Map/HeightMapTexture.h"
 #include "Map/ReadMap.h"
 #include "Rendering/Fonts/glFont.h"
 #include "Rendering/GlobalRendering.h"
@@ -132,6 +131,21 @@ LuaMatTexture::Type LuaOpenGLUtils::GetLuaMatTextureType(const std::string& name
 	return LuaMatTexture::LUATEX_NONE;
 }
 
+/***
+ * @alias MatrixName
+ * | "view"
+ * | "projection"
+ * | "viewprojection"
+ * | "viewinverse"
+ * | "projectioninverse"
+ * | "viewprojectioninverse"
+ * | "billboard"
+ * | "shadow"
+ * | "camera" # Deprecated
+ * | "camprj" # Deprecated
+ * | "caminv" # Deprecated
+ * | "camprjinv" # Deprecated
+ */
 LuaMatrixType LuaOpenGLUtils::GetLuaMatrixType(const char* name)
 {
 	switch (hashString(name)) {
@@ -450,7 +464,7 @@ bool LuaOpenGLUtils::ParseTextureImage(lua_State* L, LuaMatTexture& texUnit, con
 				} break;
 
 				case LuaMatTexture::LUATEX_HEIGHTMAP: {
-					if (heightMapTexture->GetTextureID() == 0) {
+					if (readMap->GetHeightMapTexture() == 0) {
 						// optional, return false when not available
 						return false;
 					}
@@ -562,8 +576,8 @@ GLuint LuaMatTexture::GetTextureID() const
 			texID = shadowHandler.GetColorTextureID();
 		} break;
 		case LUATEX_HEIGHTMAP: {
-			if (heightMapTexture != nullptr)
-				texID = heightMapTexture->GetTextureID();
+			if (auto hmTexID = readMap->GetHeightMapTexture())
+				texID = hmTexID;
 		} break;
 
 
@@ -910,8 +924,9 @@ std::tuple<int, int, int> LuaMatTexture::GetSize() const
 			return ReturnHelper(shadowHandler.shadowMapSize);
 		} break;
 		case LUATEX_HEIGHTMAP: {
-			if (heightMapTexture != nullptr)
-				return ReturnHelper(heightMapTexture->GetSizeX(), heightMapTexture->GetSizeY());
+			if (readMap != nullptr)
+				if (const auto& hmTex = readMap->GetHeightMapTextureObj(); hmTex.GetID())
+					return ReturnHelper(hmTex.GetSize().x, hmTex.GetSize().y);
 		} break;
 
 

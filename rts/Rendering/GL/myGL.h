@@ -17,6 +17,7 @@
 #include "System/UnorderedMap.hpp"
 
 #include "glStateDebug.h"
+#include "glDebugGroup.hpp"
 
 #if       defined(HEADLESS)
 	// All OpenGL functions should always exists on HEADLESS.
@@ -27,12 +28,8 @@
 	#define IS_GL_FUNCTION_AVAILABLE(functionName) true
 #else
 	// Check if the functions address is non-NULL.
-	#define IS_GL_FUNCTION_AVAILABLE(functionName) (functionName != NULL)
+	#define IS_GL_FUNCTION_AVAILABLE(functionName) (functionName != nullptr)
 #endif // defined(HEADLESS)
-
-#ifndef GL_INVALID_INDEX
-	#define GL_INVALID_INDEX -1
-#endif
 
 struct TextureParameters {
 	GLint intFmt;

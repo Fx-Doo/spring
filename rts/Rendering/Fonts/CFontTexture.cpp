@@ -74,11 +74,16 @@
 typedef unsigned char FT_Byte;
 #endif
 
-
 static spring::unordered_map<std::string, std::weak_ptr<FontFace>> fontFaceCache;
 static spring::unordered_map<std::string, std::weak_ptr<FontFileBytes>> fontMemCache;
 static spring::unordered_set<std::pair<std::string, int>, spring::synced_hash<std::pair<std::string, int>>> invalidFonts;
 static auto cacheMutexes = spring::WrappedSyncRecursiveMutex{};
+
+struct TimestampedFont { std::shared_ptr<FontFace> fontFace; float timestamp; };
+
+/* pinnedRecentFonts maintains shared_ptrs to the weak_ptrs from fontFaceCache. This prevents the weak_ptr from expiring
+ * when no other part of the code holds a shared_ptr, as is the case when searching game and system fallback fonts. */
+static spring::unordered_map<std::pair<std::string, int>, TimestampedFont> pinnedRecentFonts;
 
 #include "NonPrintableSymbols.inl"
 
@@ -107,6 +112,7 @@ public:
 	}
 
 	~FtLibraryHandler() {
+		pinnedRecentFonts.clear();
 		FT_Done_FreeType(lib);
 
 		#ifdef USE_FONTCONFIG
@@ -149,6 +155,10 @@ public:
 			std::string msg = fmt::sprintf("%s::FontConfigInit (version %d.%d.%d)", __func__, FC_MAJOR, FC_MINOR, FC_REVISION);
 			ScopedOnceTimer timer(msg);
 			ZoneScopedNC("FtLibraryHandler::FontConfigInit", tracy::Color::Purple);
+
+			searchSystemFonts = configHandler->GetBool("UseFontConfigSystemFonts");
+			searchFontAttributes = configHandler->GetBool("FontConfigSearchAttributes");
+			searchApplySubstitutions = configHandler->GetBool("FontConfigApplySubstitutions");
 
 			FcBool res;
 			std::string errprefix = fmt::sprintf("[%s] Fontconfig(version %d.%d.%d) failed to initialize", __func__, FC_MAJOR, FC_MINOR, FC_REVISION);
@@ -286,6 +296,15 @@ public:
 		FcPatternDestroy(singleton->basePattern);
 		singleton->basePattern = FcPatternCreate();
 	}
+	static bool GetSearchSystemFonts() {
+		return singleton->searchSystemFonts;
+	}
+	static bool GetSearchFontAttributes() {
+		return singleton->searchFontAttributes;
+	}
+	static bool GetSearchApplySubstitutions() {
+		return singleton->searchApplySubstitutions;
+	}
 	#endif
 private:
 	FcConfig* config;
@@ -294,6 +313,9 @@ private:
 	FcFontSet *gameFontSet;
 	FcPattern *basePattern;
 	#endif
+	bool searchSystemFonts;
+	bool searchFontAttributes;
+	bool searchApplySubstitutions;
 
 	static inline std::unique_ptr<FtLibraryHandler> singleton = nullptr;
 };
@@ -485,19 +507,20 @@ static std::shared_ptr<FontFace> GetFontForCharacters(const std::vector<char32_t
 			[](FcBlanks* b) { if (b) FcBlanksDestroy(b); }
 		);
 
-		auto origPattern = spring::ScopedResource(
-			FcFreeTypeQueryFace(origFace, ftname, 0, blanks),
-			[](FcPattern* p) { if (p) FcPatternDestroy(p); }
-		);
+		if (FtLibraryHandler::GetSearchFontAttributes()) {
+			auto origPattern = spring::ScopedResource(
+				FcFreeTypeQueryFace(origFace, ftname, 0, blanks),
+				[](FcPattern* p) { if (p) FcPatternDestroy(p); }
+			);
 
-		if (origPattern != nullptr) {
-			FcPatternGetInteger(origPattern, FC_WEIGHT    , 0, &weight );
-			FcPatternGetInteger(origPattern, FC_SLANT     , 0, &slant  );
-			FcPatternGetBool(   origPattern, FC_OUTLINE   , 0, &outline);
-			FcPatternGetDouble( origPattern, FC_PIXEL_SIZE, 0, &pixelSize);
+			if (origPattern != nullptr) {
+				FcPatternGetInteger(origPattern, FC_WEIGHT    , 0, &weight );
+				FcPatternGetInteger(origPattern, FC_SLANT     , 0, &slant  );
+				FcPatternGetBool(   origPattern, FC_OUTLINE   , 0, &outline);
+				FcPatternGetDouble( origPattern, FC_PIXEL_SIZE, 0, &pixelSize);
 
-			FcPatternGetString( origPattern, FC_FAMILY , 0, &family );
-
+				FcPatternGetString( origPattern, FC_FAMILY , 0, &family );
+			}
 		}
 
 		FcPatternAddInteger(pattern, FC_WEIGHT, weight);
@@ -512,7 +535,7 @@ static std::shared_ptr<FontFace> GetFontForCharacters(const std::vector<char32_t
 	}
 
 	FcDefaultSubstitute(pattern);
-	if (!FcConfigSubstitute(FtLibraryHandler::GetFCConfig(), pattern, FcMatchPattern))
+	if (FtLibraryHandler::GetSearchApplySubstitutions() && !FcConfigSubstitute(FtLibraryHandler::GetFCConfig(), pattern, FcMatchPattern))
 	{
 		return nullptr;
 	}
@@ -521,7 +544,7 @@ static std::shared_ptr<FontFace> GetFontForCharacters(const std::vector<char32_t
 	typedef std::unique_ptr<FcFontSet, decltype(&FcFontSetDestroy)> ScopedFcFontSet;
 
 	int nFonts = 0;
-	bool loadMore = true;
+	bool loadMore = FtLibraryHandler::GetSearchSystemFonts();
 	FcResult res;
 
 	// first search game fonts
@@ -550,6 +573,11 @@ static std::shared_ptr<FontFace> GetFontForCharacters(const std::vector<char32_t
 		if (r != FcResultMatch || cFilename == nullptr)
 			continue;
 
+		FcCharSet *patternCharSet;
+		r = FcPatternGetCharSet(font, FC_CHARSET, 0, &patternCharSet);
+		if (r != FcResultMatch || FcCharSetIntersectCount(cset, patternCharSet) == 0)
+			continue;
+
 		const std::string filename = std::string{ reinterpret_cast<char*>(cFilename) };
 
 		if (invalidFonts.find(std::make_pair(filename, origSize)) != invalidFonts.end()) //this font is known to error out
@@ -560,6 +588,8 @@ static std::shared_ptr<FontFace> GetFontForCharacters(const std::vector<char32_t
 
 			if (blackList.find(GetFaceKey(*face)) != blackList.cend())
 				continue;
+
+			CFontTexture::PinFont(face, filename, origSize);
 
 			#ifdef _DEBUG
 			{
@@ -777,6 +807,7 @@ bool CFontTexture::AddFallbackFont(const std::string& fontfile)
  */
 void CFontTexture::ClearFallbackFonts()
 {
+	pinnedRecentFonts.clear();
 #if defined(USE_FONTCONFIG) && !defined(HEADLESS)
 	if (!FtLibraryHandler::CanUseFontConfig())
 		return;
@@ -847,11 +878,41 @@ bool CFontTexture::ClearGlyphs() {
 	return changed;
 }
 
+void CFontTexture::PinFont(std::shared_ptr<FontFace>& face, const std::string& filename, const int size)
+{
+#ifndef HEADLESS
+	const auto fontKey = std::make_pair(filename, size);
+
+	float time = spring_gettime().toMilliSecsf();
+
+	auto cached = pinnedRecentFonts.find(fontKey);
+
+	if (cached != pinnedRecentFonts.end()) {
+		cached->second.timestamp = time;
+	} else {
+		if (pinnedRecentFonts.size() >= maxPinnedFonts) {
+			std::pair<string, int>* oldest;
+			float oldestTime = time;
+			for(auto &[key, timestampedFont]: pinnedRecentFonts) {
+				if (timestampedFont.timestamp <= oldestTime) {
+					oldest = &key;
+					oldestTime = timestampedFont.timestamp;
+				}
+			}
+			pinnedRecentFonts.erase(*oldest);
+		}
+		pinnedRecentFonts[fontKey] = { face, time };
+	}
+#endif
+}
+
+
 void CFontTexture::InitFonts()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 #ifndef HEADLESS
 	maxFontTries = configHandler ? configHandler->GetInt("MaxFontTries") : 5;
+	maxPinnedFonts = configHandler ? configHandler->GetInt("MaxPinnedFonts") : 10;
 #endif
 }
 
@@ -1014,7 +1075,7 @@ void CFontTexture::LoadWantedGlyphs(const std::vector<char32_t>& wanted)
 				++idx;
 			}
 		}
-		f = GetFontForCharacters(map, *f, fontSize, alreadyCheckedFonts);
+		f = GetFontForCharacters(map, *shFace, fontSize, alreadyCheckedFonts);
 	} while (!map.empty() && f);
 
 	// handle glyphs that didn't reach maxFontTries number of attempts, but nonetheless failed

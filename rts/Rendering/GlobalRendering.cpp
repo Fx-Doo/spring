@@ -43,6 +43,7 @@
 
 CONFIG(bool, DebugGL).defaultValue(false).description("Enables GL debug-context and output. (see GL_ARB_debug_output)");
 CONFIG(bool, DebugGLStacktraces).defaultValue(false).description("Create a stacktrace when an OpenGL error occurs");
+CONFIG(bool, DebugGLReportGroups).defaultValue(false).description("Show OpenGL PUSH/POP groups in the GL debug");
 
 CONFIG(int, GLContextMajorVersion).defaultValue(3).minimumValue(3).maximumValue(4);
 CONFIG(int, GLContextMinorVersion).defaultValue(0).minimumValue(0).maximumValue(5);
@@ -166,6 +167,7 @@ CR_REG_METADATA(CGlobalRendering, (
 	CR_IGNORED(msaaLevel),
 	CR_IGNORED(minSampleShadingRate),
 	CR_IGNORED(maxTextureSize),
+	CR_IGNORED(maxTexSlots),
 	CR_IGNORED(maxFragShSlots),
 	CR_IGNORED(maxCombShSlots),
 	CR_IGNORED(maxTexAnisoLvl),
@@ -280,6 +282,7 @@ CGlobalRendering::CGlobalRendering()
 	, msaaLevel(configHandler->GetInt("MSAALevel"))
 	, minSampleShadingRate(configHandler->GetFloat("MinSampleShadingRate"))
 	, maxTextureSize(2048)
+	, maxTexSlots(2)
 	, maxFragShSlots(8)
 	, maxCombShSlots(8)
 	, maxTexAnisoLvl(0.0f)
@@ -656,6 +659,7 @@ void CGlobalRendering::SwapBuffers(bool allowSwapBuffers, bool clearErrors)
 	spring_time pre;
 	{
 		SCOPED_TIMER("Misc::SwapBuffers");
+		SCOPED_GL_DEBUGGROUP("Misc::SwapBuffers");
 		assert(sdlWindow);
 
 		// silently or verbosely clear queue at the end of every frame
@@ -901,7 +905,7 @@ void CGlobalRendering::QueryGLMaxVals()
 {
 	// maximum 2D texture size
 	glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
-
+	glGetIntegerv(GL_MAX_TEXTURE_COORDS, &maxTexSlots);
 	glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &maxFragShSlots);
 	glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &maxCombShSlots);
 
@@ -1013,6 +1017,7 @@ void CGlobalRendering::LogVersionInfo(const char* sdlVersionStr, const char* glV
 
 	LOG("\t");
 	LOG("\tmax. FBO samples              : %i", FBO::GetMaxSamples());
+	LOG("\tmax. texture slots            : %i", maxTexSlots);
 	LOG("\tmax. FS/program texture slots : %i/%i", maxFragShSlots, maxCombShSlots);
 	LOG("\tmax. texture size             : %i", maxTextureSize);
 	LOG("\tmax. texture anisotropy level : %f", maxTexAnisoLvl);
@@ -1084,6 +1089,16 @@ void CGlobalRendering::LogVersionInfo(const char* sdlVersionStr, const char* glV
 		EnumToString(GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x10_KHR),
 		EnumToString(GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x10_KHR),
 		EnumToString(GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR),
+		EnumToString(GL_PALETTE4_RGB8_OES),
+		EnumToString(GL_PALETTE4_RGBA8_OES),
+		EnumToString(GL_PALETTE4_R5_G6_B5_OES),
+		EnumToString(GL_PALETTE4_RGBA4_OES),
+		EnumToString(GL_PALETTE4_RGB5_A1_OES),
+		EnumToString(GL_PALETTE8_RGB8_OES),
+		EnumToString(GL_PALETTE8_RGBA8_OES),
+		EnumToString(GL_PALETTE8_R5_G6_B5_OES),
+		EnumToString(GL_PALETTE8_RGBA4_OES),
+		EnumToString(GL_PALETTE8_RGB5_A1_OES)
 	};
 	#undef EnumToString
 
@@ -1861,59 +1876,6 @@ bool CGlobalRendering::CheckGLContextVersion(const int2& minCtx) const
 	#endif
 }
 
-
-
-#if defined(_WIN32) && !defined(HEADLESS)
-	#if defined(_MSC_VER) && _MSC_VER >= 1600
-		#define _GL_APIENTRY __stdcall
-	#else
-		#include <windef.h>
-		#define _GL_APIENTRY APIENTRY
-	#endif
-#else
-	#define _GL_APIENTRY
-#endif
-
-
-#if (defined(GL_ARB_debug_output) && !defined(HEADLESS))
-
-#ifndef GL_DEBUG_SOURCE_API
-#define GL_DEBUG_SOURCE_API                GL_DEBUG_SOURCE_API_ARB
-#define GL_DEBUG_SOURCE_WINDOW_SYSTEM      GL_DEBUG_SOURCE_WINDOW_SYSTEM_ARB
-#define GL_DEBUG_SOURCE_SHADER_COMPILER    GL_DEBUG_SOURCE_SHADER_COMPILER_ARB
-#define GL_DEBUG_SOURCE_THIRD_PARTY        GL_DEBUG_SOURCE_THIRD_PARTY_ARB
-#define GL_DEBUG_SOURCE_APPLICATION        GL_DEBUG_SOURCE_APPLICATION_ARB
-#define GL_DEBUG_SOURCE_OTHER              GL_DEBUG_SOURCE_OTHER_ARB
-
-#define GL_DEBUG_TYPE_ERROR                GL_DEBUG_TYPE_ERROR_ARB
-#define GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR  GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR_ARB
-#define GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR   GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR_ARB
-#define GL_DEBUG_TYPE_PORTABILITY          GL_DEBUG_TYPE_PORTABILITY_ARB
-#define GL_DEBUG_TYPE_PERFORMANCE          GL_DEBUG_TYPE_PERFORMANCE_ARB
-#if (defined(GL_DEBUG_TYPE_MARKER_ARB) && defined(GL_DEBUG_TYPE_PUSH_GROUP_ARB) && defined(GL_DEBUG_TYPE_POP_GROUP_ARB))
-#define GL_DEBUG_TYPE_MARKER               GL_DEBUG_TYPE_MARKER_ARB
-#define GL_DEBUG_TYPE_PUSH_GROUP           GL_DEBUG_TYPE_PUSH_GROUP_ARB
-#define GL_DEBUG_TYPE_POP_GROUP            GL_DEBUG_TYPE_POP_GROUP_ARB
-#else
-#define GL_DEBUG_TYPE_MARKER               -1u
-#define GL_DEBUG_TYPE_PUSH_GROUP           -2u
-#define GL_DEBUG_TYPE_POP_GROUP            -3u
-#endif
-#define GL_DEBUG_TYPE_OTHER                GL_DEBUG_TYPE_OTHER_ARB
-
-#define GL_DEBUG_SEVERITY_HIGH             GL_DEBUG_SEVERITY_HIGH_ARB
-#define GL_DEBUG_SEVERITY_MEDIUM           GL_DEBUG_SEVERITY_MEDIUM_ARB
-#define GL_DEBUG_SEVERITY_LOW              GL_DEBUG_SEVERITY_LOW_ARB
-
-#define GL_DEBUG_OUTPUT_SYNCHRONOUS        GL_DEBUG_OUTPUT_SYNCHRONOUS_ARB
-#define GLDEBUGPROC                        GLDEBUGPROCARB
-#endif
-
-#ifndef glDebugMessageCallback
-#define glDebugMessageCallback  glDebugMessageCallbackARB
-#define glDebugMessageControl   glDebugMessageControlARB
-#endif
-
 constexpr static std::array<GLenum,  7> msgSrceEnums = {GL_DONT_CARE, GL_DEBUG_SOURCE_API, GL_DEBUG_SOURCE_WINDOW_SYSTEM, GL_DEBUG_SOURCE_SHADER_COMPILER, GL_DEBUG_SOURCE_THIRD_PARTY, GL_DEBUG_SOURCE_APPLICATION, GL_DEBUG_SOURCE_OTHER};
 constexpr static std::array<GLenum, 10> msgTypeEnums = {GL_DONT_CARE, GL_DEBUG_TYPE_ERROR, GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR, GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR, GL_DEBUG_TYPE_PORTABILITY, GL_DEBUG_TYPE_PERFORMANCE, GL_DEBUG_TYPE_MARKER, GL_DEBUG_TYPE_PUSH_GROUP, GL_DEBUG_TYPE_POP_GROUP, GL_DEBUG_TYPE_OTHER};
 constexpr static std::array<GLenum,  4> msgSevrEnums = {GL_DONT_CARE, GL_DEBUG_SEVERITY_LOW, GL_DEBUG_SEVERITY_MEDIUM, GL_DEBUG_SEVERITY_HIGH};
@@ -1963,7 +1925,14 @@ static inline const char* glDebugMessageSeverityName(GLenum msgSevr) {
 	return "UNKNOWN";
 }
 
-static void _GL_APIENTRY glDebugMessageCallbackFunc(
+#ifndef HEADLESS
+
+struct GLDebugOptions {
+	bool dbgTraces;
+	bool dbgGroups;
+};
+
+static void APIENTRY glDebugMessageCallbackFunc(
 	GLenum msgSrce,
 	GLenum msgType,
 	GLuint msgID,
@@ -1978,13 +1947,18 @@ static void _GL_APIENTRY glDebugMessageCallbackFunc(
 		default: {} break;
 	}
 
+	const auto* glDebugOptions = reinterpret_cast<const GLDebugOptions*>(userParam);
+
+	if ((glDebugOptions == nullptr) || !glDebugOptions->dbgGroups && (msgType == GL_DEBUG_TYPE_PUSH_GROUP || msgType == GL_DEBUG_TYPE_POP_GROUP))
+		return;
+
 	const char* msgSrceStr = glDebugMessageSourceName(msgSrce);
 	const char* msgTypeStr = glDebugMessageTypeName(msgType);
 	const char* msgSevrStr = glDebugMessageSeverityName(msgSevr);
 
 	LOG_L(L_WARNING, "[OPENGL_DEBUG] id=%u source=%s type=%s severity=%s msg=\"%s\"", msgID, msgSrceStr, msgTypeStr, msgSevrStr, dbgMessage);
 
-	if ((userParam == nullptr) || !(*reinterpret_cast<const bool*>(userParam)))
+	if ((glDebugOptions == nullptr) || !glDebugOptions->dbgTraces)
 		return;
 
 	CrashHandler::PrepareStacktrace();
@@ -1993,10 +1967,9 @@ static void _GL_APIENTRY glDebugMessageCallbackFunc(
 }
 #endif
 
-
 bool CGlobalRendering::ToggleGLDebugOutput(unsigned int msgSrceIdx, unsigned int msgTypeIdx, unsigned int msgSevrIdx) const
 {
-#if (defined(GL_ARB_debug_output) && !defined(HEADLESS))
+#ifndef HEADLESS
 	if (!(GLAD_GL_ARB_debug_output || GLAD_GL_KHR_debug))
 		return false;
 
@@ -2005,14 +1978,13 @@ bool CGlobalRendering::ToggleGLDebugOutput(unsigned int msgSrceIdx, unsigned int
 		const char* msgTypeStr = glDebugMessageTypeName(msgTypeEnums[msgTypeIdx %= msgTypeEnums.size()]);
 		const char* msgSevrStr = glDebugMessageSeverityName(msgSevrEnums[msgSevrIdx %= msgSevrEnums.size()]);
 
-		const static bool dbgTraces = configHandler->GetBool("DebugGLStacktraces");
-		// install OpenGL debug message callback; typecast is a workaround
-		// for #4510 (change in callback function signature with GLEW 1.11)
-		// use SYNCHRONOUS output, we want our callback to run in the same
-		// thread as the bugged GL call (for proper stacktraces)
-		// CB userParam is const, but has to be specified sans qualifiers
+		static GLDebugOptions glDebugOptions;
+
+		glDebugOptions.dbgTraces = configHandler->GetBool("DebugGLStacktraces");
+		glDebugOptions.dbgGroups = configHandler->GetBool("DebugGLReportGroups");
+
 		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-		glDebugMessageCallback((GLDEBUGPROC)&glDebugMessageCallbackFunc, (void*)&dbgTraces);
+		glDebugMessageCallback((GLDEBUGPROC)&glDebugMessageCallbackFunc, (const void*)&glDebugOptions);
 		glDebugMessageControl(msgSrceEnums[msgSrceIdx], msgTypeEnums[msgTypeIdx], msgSevrEnums[msgSevrIdx], 0, nullptr, GL_TRUE);
 
 		LOG("[GR::%s] OpenGL debug-message callback enabled (source=%s type=%s severity=%s)", __func__, msgSrceStr, msgTypeStr, msgSevrStr);

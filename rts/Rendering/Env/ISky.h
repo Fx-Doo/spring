@@ -44,10 +44,17 @@ public:
 	 */
 	void SetupFog();
 
+	bool IsUpdated() {
+		return std::exchange(updated, false);
+	}
+	void SetUpdated() { updated = true; }
 public:
 	static void SetSky();
 	static auto& GetSky() { return sky; }
 	static void KillSky() { sky = nullptr; }
+public:
+	void SetSkyAxisAngle(const float4& skyAxisAngleRaw);
+	const float4& GetSkyAxisAngle() const { return skyAxisAngle; }
 public:
 	float3 skyColor;
 	float3 sunColor;
@@ -57,13 +64,16 @@ public:
 	float fogStart;
 	float fogEnd;
 	float cloudDensity;
-
+protected:
+	float4 skyAxisAngle;
 protected:
 	static inline std::unique_ptr<ISky> sky = nullptr;
 
 	ISkyLight* skyLight;
 
 	bool wireFrameMode;
+private:
+	bool updated;
 };
 
 #endif // I_SKY_H

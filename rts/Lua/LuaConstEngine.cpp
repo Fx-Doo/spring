@@ -5,6 +5,7 @@
 #include "LuaUtils.h"
 #include "Game/GameVersion.h"
 #include "System/Platform/Misc.h"
+#include "Rendering/Fonts/glFont.h"
 
 /******************************************************************************
  * Engine constants
@@ -13,9 +14,15 @@
 
 /***
  * @class FeatureSupport
- * @field NegativeGetUnitCurrentCommand boolean
- * @field hasExitOnlyYardmaps boolean
- * @field rmlUiApiVersion integer
+ * @field NegativeGetUnitCurrentCommand boolean Whether Spring.GetUnitCurrentCommand allows negative indices to look from the end
+ * @field hasExitOnlyYardmaps boolean Whether yardmaps accept 'e' (exit only) and 'u' (unbuildable, walkable)
+ * @field rmlUiApiVersion integer Version of Recoil's rmlUI API
+ * @field noAutoShowMetal boolean Whether the engine switches to the metal view when selecting a "build metal extractor" command (yes if false)
+ * @field maxPiecesPerModel integer How many pieces supported for 3d models?
+ * @field gunshipCruiseAltitudeMultiplier number For gunships, the cruiseAltitude from the unit def is multiplied by this much
+ * @field noRefundForConstructionDecay boolean Whether there is no refund for construction decay (100% metal back if false)
+ * @field noRefundForFactoryCancel boolean Whether there is no refund for factory cancel (100% metal back if false)
+ * @field noOffsetForFeatureID boolean Whether featureID from various interfaces (targetID for Reclaim commands, ownerID from SpringGetGroundDecalOwner, etc) needs to be offset by `Game.maxUnits`
  */
 
 /***
@@ -31,6 +38,8 @@
  * @field buildFlags string Gets additional engine buildflags, e.g. "Debug" or "Sync-Debug"
  * @field featureSupport FeatureSupport Table containing various engine features as keys; use for cross-version compat
  * @field wordSize number Indicates the build type always 64 these days
+ * @field gameSpeed number Number of simulation gameframes per second
+ * @field textColorCodes TextColorCode Table containing keys that represent the color code operations during font rendering
  */
 
 bool LuaConstEngine::PushEntries(lua_State* L)
@@ -44,6 +53,7 @@ bool LuaConstEngine::PushEntries(lua_State* L)
 	LuaPushNamedString(L, "buildFlags"     , SpringVersion::GetAdditional());
 	LuaPushNamedNumber(L, "wordSize", (!CLuaHandle::GetHandleSynced(L))? Platform::NativeWordSize() * 8: 0);
 
+	LuaPushNamedNumber(L, "gameSpeed", GAME_SPEED);
 
 	/* If possible, entries should be bools that resolve to false in the "old" version
 	 * and to true in the "new" version; this is because any version beforehand has it
@@ -53,12 +63,23 @@ bool LuaConstEngine::PushEntries(lua_State* L)
 	 *
 	 * will be compatible even on engines that don't yet know about the entry at all. */
 	lua_pushliteral(L, "FeatureSupport");
-	lua_createtable(L, 0, 3);
+	lua_createtable(L, 0, 9);
 		LuaPushNamedBool(L, "NegativeGetUnitCurrentCommand", true);
 		LuaPushNamedBool(L, "hasExitOnlyYardmaps", true);
 		LuaPushNamedNumber(L, "rmlUiApiVersion", 1);
 		LuaPushNamedBool(L, "noAutoShowMetal", false);
 		LuaPushNamedNumber(L, "maxPiecesPerModel", MAX_PIECES_PER_MODEL);
+		LuaPushNamedNumber(L, "gunshipCruiseAltitudeMultiplier", 1.5f); // see https://github.com/beyond-all-reason/spring/issues/1028
+		LuaPushNamedBool(L, "noRefundForConstructionDecay", false);
+		LuaPushNamedBool(L, "noRefundForFactoryCancel", false);
+		LuaPushNamedBool(L, "noOffsetForFeatureID", false);
+	lua_rawset(L, -3);
+
+	lua_pushliteral(L, "textColorCodes");
+	lua_createtable(L, 0, 3);
+		LuaPushNamedChar(L, "Color"          , static_cast<char>(CglFont::ColorCodeIndicator  ));
+		LuaPushNamedChar(L, "ColorAndOutline", static_cast<char>(CglFont::ColorCodeIndicatorEx));
+		LuaPushNamedChar(L, "Reset"          , static_cast<char>(CglFont::ColorResetIndicator ));
 	lua_rawset(L, -3);
 
 	return true;

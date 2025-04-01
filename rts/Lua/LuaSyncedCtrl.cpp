@@ -355,6 +355,7 @@ bool LuaSyncedCtrl::PushEntries(lua_State* L)
 
 	REGISTER_LUA_CFUNC(SetRadarErrorParams);
 
+	/*** @field Spring.MoveCtrl MoveCtrl */
 	if (!LuaSyncedMoveCtrl::PushMoveCtrl(L))
 		return false;
 
@@ -569,6 +570,19 @@ static int SetSolidObjectCollisionVolumeData(lua_State* L, CSolidObject* o)
 	return LuaUtils::ParseColVolData(L, 2, &o->collisionVolume);
 }
 
+/** - Not exported
+ * 
+ * Parses the following params, starting from the 2nd index:
+ * 
+ * @param isBlocking boolean? If `true` add this object to the `GroundBlockingMap`, but only if it collides with solid objects (or is being set to collide with the `isSolidObjectCollidable` argument). If `false`, remove this object from the `GroundBlockingMap`. No change if `nil`.
+ * @param isSolidObjectCollidable boolean? Enable or disable collision with solid objects, or no change if `nil`.
+ * @param isProjectileCollidable boolean? Enable or disable collision with projectiles, or no change if `nil`.
+ * @param isRaySegmentCollidable boolean? Enable or disable collision with ray segments, or no change if `nil`.
+ * @param crushable boolean? Enable or disable crushable, or no change if `nil`.
+ * @param blockEnemyPushing boolean? Enable or disable blocking enemy pushing, or no change if `nil`.
+ * @param blockHeightChanges boolean? Enable or disable blocking height changes, or no change if `nil`.
+ * @return boolean isBlocking
+ */
 static int SetSolidObjectBlocking(lua_State* L, CSolidObject* o)
 {
 	if (o == nullptr)
@@ -604,23 +618,27 @@ static int SetSolidObjectBlocking(lua_State* L, CSolidObject* o)
 	return 1;
 }
 
-static int SetSolidObjectRotation(lua_State* L, CSolidObject* o, bool isFeature)
+template<typename T>
+static int SetSolidObjectRotation(lua_State* L, T* o)
 {
 	if (o == nullptr)
 		return 0;
 
-	o->SetDirVectorsEuler(float3(luaL_checkfloat(L, 2), luaL_checkfloat(L, 3), luaL_checkfloat(L, 4)));
+	float3 angles;
+	angles[CMatrix44f::ANGLE_P] = luaL_checkfloat(L, 2);
+	angles[CMatrix44f::ANGLE_Y] = luaL_checkfloat(L, 3);
+	angles[CMatrix44f::ANGLE_R] = luaL_checkfloat(L, 4);
 
-	// not a hack: ForcedSpin() and CalculateTransform() calculate a
-	// transform based only on frontdir and assume the helper y-axis
-	// points up
-	if (isFeature)
-		static_cast<CFeature*>(o)->UpdateTransform(o->pos, true);
+	o->SetDirVectorsEuler(angles);
+
+	if constexpr(std::is_same_v<T, CFeature>)
+		o->UpdateTransform(o->pos, true);
 
 	return 0;
 }
 
-static int SetSolidObjectHeadingAndUpDir(lua_State* L, CSolidObject* o, bool isFeature)
+template<typename T>
+static int SetSolidObjectHeadingAndUpDir(lua_State* L, T* o)
 {
 	if (o == nullptr)
 		return 0;
@@ -635,24 +653,73 @@ static int SetSolidObjectHeadingAndUpDir(lua_State* L, CSolidObject* o, bool isF
 	o->SetFacingFromHeading();
 	o->UpdateMidAndAimPos();
 
-	if (isFeature)
-		static_cast<CFeature*>(o)->UpdateTransform(o->pos, true);
+	if constexpr (std::is_same_v<T, CFeature>)
+		o->UpdateTransform(o->pos, true);
 
 	return 0;
 }
 
-static int SetSolidObjectDirection(lua_State* L, CSolidObject* o)
+static int SetSolidObjectDirection(lua_State* L, CSolidObject* o, const char* func)
 {
 	if (o == nullptr)
 		return 0;
 
-	const float3 newDir = float3(luaL_checkfloat(L, 2), luaL_checkfloat(L, 3), luaL_checkfloat(L, 4)).SafeNormalize();
+	const char* modelName = o->model ? o->model->name.c_str() : "nullptr";
 
-	if (math::fabsf(newDir.SqLength() - 1.0f) > float3::cmp_eps()) {
-		luaL_error(L, "[%s] Invalid front-direction (%f, %f, %f), id = %d, model = %s, teamID = %d", __func__, newDir.x, newDir.y, newDir.z, o->id, o->model ? o->model->name.c_str() : "nullptr", o->team);
+	const float3 newFrontDir = float3(luaL_checkfloat(L, 2), luaL_checkfloat(L, 3), luaL_checkfloat(L, 4)).SafeNormalize();
+
+	if (math::fabsf(newFrontDir.SqLength() - 1.0f) > float3::cmp_eps()) {
+		luaL_error(L, "[%s] Invalid front-direction (%f, %f, %f), id = %d, model = %s, teamID = %d",
+			func,
+			newFrontDir.x,
+			newFrontDir.y,
+			newFrontDir.z,
+			o->id,
+			modelName,
+			o->team
+		);
 	}
 
-	o->ForcedSpin(newDir);
+	// Note there's no need to call o->UpdateTransform(o->pos, true); because both variants of o->ForcedSpin
+	// defined in CFeature do it anyway
+
+	if (lua_isnumber(L, 5) && lua_isnumber(L, 6) && lua_isnumber(L, 7)) {
+		const float3 newRightDir = float3(luaL_checkfloat(L, 5), luaL_checkfloat(L, 6), luaL_checkfloat(L, 7)).SafeNormalize();
+		if (math::fabsf(newRightDir.SqLength() - 1.0f) > float3::cmp_eps()) {
+			luaL_error(L, "[%s] Invalid optional right-direction (%f, %f, %f), id = %d, model = %s, teamID = %d",
+				func,
+				newRightDir.x,
+				newRightDir.y,
+				newRightDir.z,
+				o->id,
+				modelName,
+				o->team
+			);
+		}
+
+		const float dp = newFrontDir.dot(newRightDir);
+		if (math::fabsf(dp) > float3::cmp_eps()) {
+			luaL_error(L, "[%s] front(%f, %f, %f) and right(%f, %f, %f) vectors are not orthogonal(dp=%f), id = %d, model = %s, teamID = %d",
+				func,
+				newFrontDir.x,
+				newFrontDir.y,
+				newFrontDir.z,
+				newRightDir.x,
+				newRightDir.y,
+				newRightDir.z,
+				dp,
+				o->id,
+				modelName,
+				o->team
+			);
+		}
+
+		o->ForcedSpin(newFrontDir, newRightDir);
+	}
+	else {
+		o->ForcedSpin(newFrontDir);
+	}
+
 	return 0;
 }
 
@@ -1625,8 +1692,8 @@ int LuaSyncedCtrl::GetCOBScriptID(lua_State* L)
  * @param z number
  * @param facing Facing
  * @param teamID integer
- * @param build boolean? (Default: false) the unit is created in "being built" state with buildProgress = 0
- * @param flattenGround boolean? (Default: true) the unit flattens ground, if it normally does so
+ * @param build boolean? (Default: `false`) the unit is created in "being built" state with buildProgress = 0
+ * @param flattenGround boolean? (Default: `true`) the unit flattens ground, if it normally does so
  * @param unitID integer? requests specific unitID
  * @param builderID integer?
  * @return number|nil unitID meaning unit was created
@@ -1719,10 +1786,10 @@ int LuaSyncedCtrl::CreateUnit(lua_State* L)
  * @function Spring.DestroyUnit
  * @see Spring.CreateUnit
  * @param unitID integer
- * @param selfd boolean? (Default: false) makes the unit act like it self-destructed.
- * @param reclaimed boolean? (Default: false) don't show any DeathSequences, don't leave a wreckage. This does not give back the resources to the team!
+ * @param selfd boolean? (Default: `false`) makes the unit act like it self-destructed.
+ * @param reclaimed boolean? (Default: `false`) don't show any DeathSequences, don't leave a wreckage. This does not give back the resources to the team!
  * @param attackerID integer?
- * @param cleanupImmediately boolean? (Default: false) stronger version of reclaimed, removes the unit unconditionally and makes its ID available for immediate reuse (otherwise it takes a few frames)
+ * @param cleanupImmediately boolean? (Default: `false`) stronger version of reclaimed, removes the unit unconditionally and makes its ID available for immediate reuse (otherwise it takes a few frames)
  * @return nil
  */
 int LuaSyncedCtrl::DestroyUnit(lua_State* L)
@@ -1764,7 +1831,7 @@ int LuaSyncedCtrl::DestroyUnit(lua_State* L)
  * @function Spring.TransferUnit
  * @param unitID integer
  * @param newTeamID integer
- * @param given boolean? (Default: true) if false, the unit is captured.
+ * @param given boolean? (Default: `true`) if false, the unit is captured.
  * @return nil
  */
 int LuaSyncedCtrl::TransferUnit(lua_State* L)
@@ -2042,12 +2109,27 @@ int LuaSyncedCtrl::SetUnitTooltip(lua_State* L)
 	return 0;
 }
 
+/***
+ * @class SetUnitHealthAmounts
+ * @field health number? Set the unit's health.
+ * @field capture number? Set the unit's capture progress.
+ * @field paralyze number? Set the unit's paralyze damage.
+ * @field build number? Set the unit's build progress.
+ */
 
 /***
  * @function Spring.SetUnitHealth
+ *
+ * Note, if your game's custom shading framework doesn't support reverting into nanoframes
+ * then reverting into nanoframes via the "build" tag will fail to render properly.
+ *
  * @param unitID integer
- * @param health number|table<string,number> where keys can be one of health|capture|paralyze|build and values are amounts
+ * @param health number|SetUnitHealthAmounts If a number, sets the units health
+ * to that value. Pass a table to update health, capture progress, paralyze
+ * damage, and build progress.
  * @return nil
+ * 
+ * @see SetUnitHealthAmounts
  */
 int LuaSyncedCtrl::SetUnitHealth(lua_State* L)
 {
@@ -2085,6 +2167,8 @@ int LuaSyncedCtrl::SetUnitHealth(lua_State* L)
 				case hashString("build"): {
 					if ((unit->buildProgress = lua_tofloat(L, LUA_TABLE_VALUE_INDEX)) >= 1.0f)
 						unit->FinishedBuilding(false);
+					else
+						unit->TurnIntoNanoframe();
 				} break;
 				default: {
 				} break;
@@ -2170,6 +2254,7 @@ int LuaSyncedCtrl::SetUnitStockpile(lua_State* L)
  * @field forceAim integer?
  * @field avoidFlags integer?
  * @field collisionFlags integer?
+ * @field ttl number? How many seconds the projectile should live 
  */
 
 static bool SetSingleUnitWeaponState(lua_State* L, CWeapon* weapon, int index)
@@ -2241,6 +2326,10 @@ static bool SetSingleUnitWeaponState(lua_State* L, CWeapon* weapon, int index)
 		} break;
 		case hashString("collisionFlags"): {
 			weapon->collisionFlags = lua_toint(L, index + 1);
+		} break;
+
+		case hashString("ttl"): {
+			weapon->ttl = (int) (lua_tonumber(L, index + 1) * GAME_SPEED);
 		} break;
 
 		default: {
@@ -2996,14 +3085,14 @@ int LuaSyncedCtrl::SetUnitNanoPieces(lua_State* L)
 /***
  * @function Spring.SetUnitBlocking
  * @param unitID integer
- * @param isblocking boolean
- * @param isSolidObjectCollidable boolean
- * @param isProjectileCollidable boolean
- * @param isRaySegmentCollidable boolean
- * @param crushable boolean
- * @param blockEnemyPushing boolean
- * @param blockHeightChanges boolean
- * @return nil
+ * @param isBlocking boolean? If `true` add this unit to the `GroundBlockingMap`, but only if it collides with solid objects (or is being set to collide with the `isSolidObjectCollidable` argument). If `false`, remove this unit from the `GroundBlockingMap`. No change if `nil`.
+ * @param isSolidObjectCollidable boolean? Enable or disable collision with solid objects, or no change if `nil`.
+ * @param isProjectileCollidable boolean? Enable or disable collision with projectiles, or no change if `nil`.
+ * @param isRaySegmentCollidable boolean? Enable or disable collision with ray segments, or no change if `nil`.
+ * @param crushable boolean? Enable or disable crushable, or no change if `nil`.
+ * @param blockEnemyPushing boolean? Enable or disable blocking enemy pushing, or no change if `nil`.
+ * @param blockHeightChanges boolean? Enable or disable blocking height changes, or no change if `nil`.
+ * @return boolean isBlocking
  */
 int LuaSyncedCtrl::SetUnitBlocking(lua_State* L)
 {
@@ -3049,7 +3138,7 @@ int LuaSyncedCtrl::SetUnitCrashing(lua_State* L) {
 /***
  * @function Spring.SetUnitShieldState
  * @param unitID integer
- * @param weaponID integer? (Default: -1)
+ * @param weaponID integer? (Default: `-1`)
  * @param enabled boolean?
  * @param power number?
  * @return nil
@@ -3235,9 +3324,9 @@ int LuaSyncedCtrl::SetUnitNeutral(lua_State* L)
  * @function Spring.SetUnitTarget
  * @param unitID integer
  * @param enemyUnitID integer? when nil drops the units current target.
- * @param dgun boolean? (Default: false)
- * @param userTarget boolean? (Default: false)
- * @param weaponNum number? (Default: -1)
+ * @param dgun boolean? (Default: `false`)
+ * @param userTarget boolean? (Default: `false`)
+ * @param weaponNum number? (Default: `-1`)
  * @return boolean success
  */
 
@@ -3247,9 +3336,9 @@ int LuaSyncedCtrl::SetUnitNeutral(lua_State* L)
  * @param x number? when nil or not passed it will drop target and ignore other parameters
  * @param y number?
  * @param z number?
- * @param dgun boolean? (Default: false)
- * @param userTarget boolean? (Default: false)
- * @param weaponNum number? (Default: -1)
+ * @param dgun boolean? (Default: `false`)
+ * @param userTarget boolean? (Default: `false`)
+ * @param weaponNum number? (Default: `-1`)
  * @return boolean success
  */
 int LuaSyncedCtrl::SetUnitTarget(lua_State* L)
@@ -3319,7 +3408,7 @@ int LuaSyncedCtrl::SetUnitTarget(lua_State* L)
  * @param apX number new positionX that enemies aim at on this unit
  * @param apY number new positionY that enemies aim at on this unit
  * @param apZ number new positionZ that enemies aim at on this unit
- * @param relative boolean? (Default: false) are the new coordinates relative to world (false) or unit (true) coordinates? Also, note that apy is inverted!
+ * @param relative boolean? (Default: `false`) are the new coordinates relative to world (false) or unit (true) coordinates? Also, note that apy is inverted!
  * @return boolean success
  */
 int LuaSyncedCtrl::SetUnitMidAndAimPos(lua_State* L)
@@ -3782,7 +3871,7 @@ int LuaSyncedCtrl::SetUnitMass(lua_State* L)
  * @param unitID integer
  * @param x number
  * @param z number
- * @param floating boolean? (Default: false) If true, over water the position is on surface. If false, on seafloor.
+ * @param floating boolean? (Default: `false`) If true, over water the position is on surface. If false, on seafloor.
  * @return nil
  */
 
@@ -3831,36 +3920,82 @@ int LuaSyncedCtrl::SetUnitPosition(lua_State* L)
 
 /***
  * @function Spring.SetUnitRotation
+ * Note: PYR order
  * @param unitID integer
- * @param yaw number
- * @param pitch number
- * @param roll number
+ * @param pitch number Rotation in X axis
+ * @param yaw number Rotation in Y axis
+ * @param roll number Rotation in Z axis
  * @return nil
  */
 int LuaSyncedCtrl::SetUnitRotation(lua_State* L)
 {
-	return (SetSolidObjectRotation(L, ParseUnit(L, __func__, 1), false));
+	return (SetSolidObjectRotation(L, ParseUnit(L, __func__, 1)));
 }
 
 
 /***
  * @function Spring.SetUnitDirection
+ * Set unit front direction vector. The vector is normalized in
+ * the engine.
+ *
+ * @deprecated It's strongly that you use the overload that accepts
+ * a right direction as `frontDir` alone doesn't define object orientation.
+ *
  * @param unitID integer
- * @param x number
- * @param y number
- * @param z number
+ * @param frontx number
+ * @param fronty number
+ * @param frontz number
  * @return nil
  */
+
+ /***
+  * @function Spring.SetUnitDirection
+  * Set unit front and right direction vectors.
+  *
+  * Both vectors will be normalized in the engine.
+  *
+  * @param unitID integer
+  * @param frontx number
+  * @param fronty number
+  * @param frontz number
+  * @param rightx number
+  * @param righty number
+  * @param rightz number
+  * @return nil
+  */
 int LuaSyncedCtrl::SetUnitDirection(lua_State* L)
 {
-	return (SetSolidObjectDirection(L, ParseUnit(L, __func__, 1)));
+	return SetSolidObjectDirection(L, ParseUnit(L, __func__, 1), __func__);
 }
 
 /***
+ * Integer in range `[-32768, 32767]` that represents a 2D (xz plane) unit
+ * orientation. 
+ * 
+ * ```
+ *                   F(N=2) = H(-32768 / 32767)
+ * 
+ *                          ^
+ *                          |
+ *                          |
+ *  F(W=3) = H(-16384)  <---o--->  F(E=1) = H(16384)
+ *                          |
+ *                          |
+ *                          v
+ * 
+ *                   F(S=0) = H(0)
+ * ```
+ * @alias Heading integer
+ */
+
+/***
  * @function Spring.SetUnitHeadingAndUpDir
- * Use this call to set up unit direction in a robust way. Heading (-32768 to 32767) represents a 2D (xz plane) unit orientation if unit was completely upright, new {upx,upy,upz} direction will be used as new "up" vector, the rotation set by "heading" will remain preserved.
+ * Use this call to set up unit direction in a robust way. If unit was
+ * completely upright, new `{upx, upy, upz}` direction will be used as new "up"
+ * vector, the rotation set by "heading" will remain preserved.
+ * 
  * @param unitID integer
- * @param heading number
+ * @param heading Heading
  * @param upx number
  * @param upy number
  * @param upz number
@@ -3868,7 +4003,7 @@ int LuaSyncedCtrl::SetUnitDirection(lua_State* L)
  */
 int LuaSyncedCtrl::SetUnitHeadingAndUpDir(lua_State* L)
 {
-	return SetSolidObjectHeadingAndUpDir(L, ParseUnit(L, __func__, 1), false);
+	return SetSolidObjectHeadingAndUpDir(L, ParseUnit(L, __func__, 1));
 }
 
 /***
@@ -3892,7 +4027,7 @@ int LuaSyncedCtrl::SetUnitVelocity(lua_State* L)
  * @param buggerOff boolean?
  * @param offset number?
  * @param radius number?
- * @param relHeading number?
+ * @param relHeading Heading?
  * @param spherical boolean?
  * @param forced boolean?
  * @return nil|number buggerOff
@@ -3927,8 +4062,8 @@ int LuaSyncedCtrl::SetFactoryBuggerOff(lua_State* L)
  * @param z number? uses ground height when unspecified
  * @param radius number
  * @param teamID integer
- * @param spherical boolean? (Default: true)
- * @param forced boolean? (Default: true)
+ * @param spherical boolean? (Default: `true`)
+ * @param forced boolean? (Default: `true`)
  * @param excludeUnitID integer?
  * @param excludeUnitDefIDs number[]?
  * @return nil
@@ -3966,9 +4101,9 @@ int LuaSyncedCtrl::BuggerOff(lua_State* L)
  *
  * @param unitID integer
  * @param damage number
- * @param paralyze number? (Default: 0) equals to the paralyzetime in the WeaponDef.
- * @param attackerID integer? (Default: -1)
- * @param weaponID integer? (Default: -1)
+ * @param paralyze number? (Default: `0`) equals to the paralyzetime in the WeaponDef.
+ * @param attackerID integer? (Default: `-1`)
+ * @param weaponID integer? (Default: `-1`)
  * @param impulseX number?
  * @param impulseY number?
  * @param impulseZ number?
@@ -4245,14 +4380,14 @@ int LuaSyncedCtrl::RemoveGrass(lua_State* L)
 
 /***
  * @function Spring.CreateFeature
- * @param featureDef string|number name or id
+ * @param featureDef string|integer name or id
  * @param x number
  * @param y number
  * @param z number
- * @param heading number?
+ * @param heading Heading?
  * @param AllyTeamID integer?
  * @param featureID integer?
- * @return number featureID
+ * @return integer featureID
  */
 int LuaSyncedCtrl::CreateFeature(lua_State* L)
 {
@@ -4642,36 +4777,62 @@ int LuaSyncedCtrl::SetFeaturePosition(lua_State* L)
 
 /***
  * @function Spring.SetFeatureRotation
+ * Note: PYR order
  * @param featureID integer
- * @param rotX number
- * @param rotY number
- * @param rotZ number
+ * @param pitch number Rotation in X axis
+ * @param yaw number Rotation in Y axis
+ * @param roll number Rotation in Z axis
  * @return nil
  */
 int LuaSyncedCtrl::SetFeatureRotation(lua_State* L)
 {
-	return (SetSolidObjectRotation(L, ParseFeature(L, __func__, 1), true));
+	return (SetSolidObjectRotation(L, ParseFeature(L, __func__, 1)));
 }
 
 
 /***
  * @function Spring.SetFeatureDirection
+ * Set feature front direction vector. The vector is normalized in
+ * the engine.
+ *
+ * @deprecated It's strongly that you use the overload that accepts
+ * a right direction as `frontDir` alone doesn't define object orientation.
+ *
  * @param featureID integer
- * @param dirX number
- * @param dirY number
- * @param dirZ number
+ * @param frontx number
+ * @param fronty number
+ * @param frontz number
  * @return nil
  */
+
+ /***
+  * @function Spring.SetFeatureDirection
+  * Set feature front and right direction vectors.
+  *
+  * Both vectors will be normalized in the engine.
+  *
+  * @param featureID integer
+  * @param frontx number
+  * @param fronty number
+  * @param frontz number
+  * @param rightx number
+  * @param righty number
+  * @param rightz number
+  * @return nil
+  */
 int LuaSyncedCtrl::SetFeatureDirection(lua_State* L)
 {
-	return (SetSolidObjectDirection(L, ParseFeature(L, __func__, 1)));
+	return SetSolidObjectDirection(L, ParseFeature(L, __func__, 1), __func__);
 }
 
 /***
  * @function Spring.SetFeatureHeadingAndUpDir
- * Use this call to set up feature direction in a robust way. Heading (-32768 to 32767) represents a 2D (xz plane) feature orientation if feature was completely upright, new {upx,upy,upz} direction will be used as new "up" vector, the rotation set by "heading" will remain preserved.
+ * Use this call to set up feature direction in a robust way. If feature was
+ * completely upright, new `{upx, upy, upz}` direction will be used as new "up"
+ * vector, the rotation set by "heading" will remain preserved.
+ * 
  * @param featureID integer
- * @param heading number
+ * @param heading Heading
  * @param upx number
  * @param upy number
  * @param upz number
@@ -4679,7 +4840,7 @@ int LuaSyncedCtrl::SetFeatureDirection(lua_State* L)
  */
 int LuaSyncedCtrl::SetFeatureHeadingAndUpDir(lua_State* L)
 {
-	return SetSolidObjectHeadingAndUpDir(L, ParseFeature(L, __func__, 1), true);
+	return SetSolidObjectHeadingAndUpDir(L, ParseFeature(L, __func__, 1));
 }
 
 /***
@@ -4699,14 +4860,14 @@ int LuaSyncedCtrl::SetFeatureVelocity(lua_State* L)
 /***
  * @function Spring.SetFeatureBlocking
  * @param featureID integer
- * @param isBlocking boolean
- * @param isSolidObjectCollidable boolean
- * @param isProjectileCollidable boolean
- * @param isRaySegmentCollidable boolean
- * @param crushable boolean
- * @param blockEnemyPushing boolean
- * @param blockHeightChanges boolean
- * @return nil
+ * @param isBlocking boolean? If `true` add this feature to the `GroundBlockingMap`, but only if it collides with solid objects (or is being set to collide with the `isSolidObjectCollidable` argument). If `false`, remove this feature from the `GroundBlockingMap`. No change if `nil`.
+ * @param isSolidObjectCollidable boolean? Enable or disable collision with solid objects, or no change if `nil`.
+ * @param isProjectileCollidable boolean? Enable or disable collision with projectiles, or no change if `nil`.
+ * @param isRaySegmentCollidable boolean? Enable or disable collision with ray segments, or no change if `nil`.
+ * @param crushable boolean? Enable or disable crushable, or no change if `nil`.
+ * @param blockEnemyPushing boolean? Enable or disable blocking enemy pushing, or no change if `nil`.
+ * @param blockHeightChanges boolean? Enable or disable blocking height changes, or no change if `nil`.
+ * @return boolean isBlocking
  */
 int LuaSyncedCtrl::SetFeatureBlocking(lua_State* L)
 {
@@ -4946,9 +5107,9 @@ int LuaSyncedCtrl::SetProjectileMoveControl(lua_State* L)
 /***
  * @function Spring.SetProjectilePosition
  * @param projectileID integer
- * @param posX number? (Default: 0)
- * @param posY number? (Default: 0)
- * @param posZ number? (Default: 0)
+ * @param posX number? (Default: `0`)
+ * @param posY number? (Default: `0`)
+ * @param posZ number? (Default: `0`)
  * @return nil
  */
 int LuaSyncedCtrl::SetProjectilePosition(lua_State* L)
@@ -4968,9 +5129,9 @@ int LuaSyncedCtrl::SetProjectilePosition(lua_State* L)
 /***
  * @function Spring.SetProjectileVelocity
  * @param projectileID integer
- * @param velX number? (Default: 0)
- * @param velY number? (Default: 0)
- * @param velZ number? (Default: 0)
+ * @param velX number? (Default: `0`)
+ * @param velY number? (Default: `0`)
+ * @param velZ number? (Default: `0`)
  * @return nil
  *
  */
@@ -5009,9 +5170,9 @@ int LuaSyncedCtrl::SetProjectileCollision(lua_State* L)
  *     string.byte('p') := PROJECTILE
  *
  * @param projectileID integer
- * @param arg1 number? (Default: 0) targetID or posX
- * @param arg2 number? (Default: 0) targetType or posY
- * @param posZ number? (Default: 0)
+ * @param arg1 number? (Default: `0`) targetID or posX
+ * @param arg2 number? (Default: `0`) targetType or posY
+ * @param posZ number? (Default: `0`)
  * @return boolean? validTarget
  */
 int LuaSyncedCtrl::SetProjectileTarget(lua_State* L)
@@ -5196,7 +5357,7 @@ int LuaSyncedCtrl::SetProjectileIgnoreTrackingError(lua_State* L)
 /***
  * @function Spring.SetProjectileGravity
  * @param projectileID integer
- * @param grav number? (Default: 0)
+ * @param grav number? (Default: `0`)
  * @return nil
  */
 int LuaSyncedCtrl::SetProjectileGravity(lua_State* L)
@@ -5309,9 +5470,11 @@ int LuaSyncedCtrl::UnitFinishCommand(lua_State* L)
 /***
  * @function Spring.GiveOrderToUnit
  * @param unitID integer
- * @param cmdID integer
- * @param params number[]?
- * @param options CommandOptions?
+ * @param cmdID CMD|integer The command ID.
+ * @param params CreateCommandParams? Parameters for the given command.
+ * @param options CreateCommandOptions?
+ * @param timeout integer?
+
  * @return boolean unitOrdered
  */
 int LuaSyncedCtrl::GiveOrderToUnit(lua_State* L)
@@ -5343,11 +5506,14 @@ int LuaSyncedCtrl::GiveOrderToUnit(lua_State* L)
 
 
 /***
+ * Give order to multiple units, specified by table keys.
+ * 
  * @function Spring.GiveOrderToUnitMap
- * @param unitMap table<number,table> table with unitIDs as keys
- * @param cmdID integer
- * @param params number[]?
- * @param options CommandOptions?
+ * @param unitMap table<number,table> A table with unit IDs as keys.
+ * @param cmdID CMD|integer The command ID.
+ * @param params CreateCommandParams? Parameters for the given command.
+ * @param options CreateCommandOptions?
+ * @param timeout integer?
  * @return number unitsOrdered
  */
 int LuaSyncedCtrl::GiveOrderToUnitMap(lua_State* L)
@@ -5388,9 +5554,10 @@ int LuaSyncedCtrl::GiveOrderToUnitMap(lua_State* L)
  *
  * @function Spring.GiveOrderToUnitArray
  * @param unitIDs number[]
- * @param cmdID integer
- * @param params number[]?
- * @param options CommandOptions?
+ * @param cmdID CMD|integer The command ID.
+ * @param params CreateCommandParams? Parameters for the given command.
+ * @param options CreateCommandOptions?
+ * @param timeout integer?
  * @return number unitsOrdered
  */
 int LuaSyncedCtrl::GiveOrderToUnitArray(lua_State* L)
@@ -5433,7 +5600,7 @@ int LuaSyncedCtrl::GiveOrderToUnitArray(lua_State* L)
  *
  * @function Spring.GiveOrderArrayToUnit
  * @param unitID integer
- * @param cmdArray Command[]
+ * @param commands CreateCommand[]
  * @return boolean ordersGiven
  */
 int LuaSyncedCtrl::GiveOrderArrayToUnit(lua_State* L)
@@ -5472,8 +5639,8 @@ int LuaSyncedCtrl::GiveOrderArrayToUnit(lua_State* L)
 
 /***
  * @function Spring.GiveOrderArrayToUnitMap
- * @param unitMap {[number]: any} table with unitIDs as keys
- * @param commands Command[]
+ * @param unitMap table<integer, any> A table with unit IDs as keys.
+ * @param commands CreateCommand[]
  * @return number unitsOrdered
  */
 int LuaSyncedCtrl::GiveOrderArrayToUnitMap(lua_State* L)
@@ -5785,7 +5952,7 @@ int LuaSyncedCtrl::AddHeightMap(lua_State* L)
  * @param x number
  * @param z number
  * @param height number
- * @param terraform number? (Default: 1) Scaling factor.
+ * @param terraform number? (Default: `1`) Scaling factor.
  * @return integer? absHeightDiff If `0`, nothing will be changed (the terraform starts), if `1` the terraform will be finished.
  *
  */
@@ -6268,7 +6435,7 @@ int LuaSyncedCtrl::RevertSmoothMesh(lua_State* L)
  * @param x number
  * @param z number
  * @param height number
- * @return number? The new height, or `nil` if coordinates are invalid.
+ * @return number? height The new height, or `nil` if coordinates are invalid.
  */
 int LuaSyncedCtrl::AddSmoothMesh(lua_State* L)
 {
@@ -6306,7 +6473,7 @@ int LuaSyncedCtrl::AddSmoothMesh(lua_State* L)
  * @param x number
  * @param z number
  * @param height number
- * @param terraform number? (Default: 1)
+ * @param terraform number? (Default: `1`)
  * @return number? The absolute height difference, or `nil` if coordinates are invalid.
  */
 int LuaSyncedCtrl::SetSmoothMesh(lua_State* L)
@@ -6862,12 +7029,12 @@ static int SetExplosionParam(lua_State* L, CExplosionParams& params, DamageArray
 
 /***
  * @function Spring.SpawnExplosion
- * @param posX number? (Default: 0)
- * @param posY number? (Default: 0)
- * @param posZ number? (Default: 0)
- * @param dirX number? (Default: 0)
- * @param dirY number? (Default: 0)
- * @param dirZ number? (Default: 0)
+ * @param posX number? (Default: `0`)
+ * @param posY number? (Default: `0`)
+ * @param posZ number? (Default: `0`)
+ * @param dirX number? (Default: `0`)
+ * @param dirY number? (Default: `0`)
+ * @param dirZ number? (Default: `0`)
  * @param explosionParams ExplosionParams
  * @return nil
  */
@@ -6935,14 +7102,14 @@ int LuaSyncedCtrl::SpawnExplosion(lua_State* L)
 /***
  * @function Spring.SpawnCEG
  * @param cegname string
- * @param posX number? (Default: 0)
- * @param posY number? (Default: 0)
- * @param posZ number? (Default: 0)
- * @param dirX number? (Default: 0)
- * @param dirY number? (Default: 0)
- * @param dirZ number? (Default: 0)
- * @param radius number? (Default: 0)
- * @param damage number? (Default: 0)
+ * @param posX number? (Default: `0`)
+ * @param posY number? (Default: `0`)
+ * @param posZ number? (Default: `0`)
+ * @param dirX number? (Default: `0`)
+ * @param dirY number? (Default: `0`)
+ * @param dirZ number? (Default: `0`)
+ * @param radius number? (Default: `0`)
+ * @param damage number? (Default: `0`)
  * @return boolean? success
  * @return number cegID
  */
@@ -6967,16 +7134,16 @@ int LuaSyncedCtrl::SpawnCEG(lua_State* L)
 /*** Equal to the UnitScript versions of EmitSFX, but takes position and direction arguments (in either unit- or piece-space) instead of a piece index.
  *
  * @function Spring.SpawnSFX
- * @param unitID integer? (Default: 0)
- * @param sfxID integer? (Default: 0)
- * @param posX number? (Default: 0)
- * @param posY number? (Default: 0)
- * @param posZ number? (Default: 0)
- * @param dirX number? (Default: 0)
- * @param dirY number? (Default: 0)
- * @param dirZ number? (Default: 0)
- * @param radius number? (Default: 0)
- * @param damage number? (Default: 0)
+ * @param unitID integer? (Default: `0`)
+ * @param sfxID integer? (Default: `0`)
+ * @param posX number? (Default: `0`)
+ * @param posY number? (Default: `0`)
+ * @param posZ number? (Default: `0`)
+ * @param dirX number? (Default: `0`)
+ * @param dirY number? (Default: `0`)
+ * @param dirZ number? (Default: `0`)
+ * @param radius number? (Default: `0`)
+ * @param damage number? (Default: `0`)
  * @param absolute boolean?
  * @return boolean? success
  */
@@ -7221,10 +7388,19 @@ int LuaSyncedCtrl::EditUnitCmdDesc(lua_State* L)
 
 
 /***
+ * Insert a command description at a specific index.
+ * 
  * @function Spring.InsertUnitCmdDesc
  * @param unitID integer
- * @param cmdDescID integer?
- * @param cmdArray CommandDescription
+ * @param index integer
+ * @param cmdDesc CommandDescription
+ */
+/***
+ * Insert a command description at the last position.
+ * 
+ * @function Spring.InsertUnitCmdDesc
+ * @param unitID integer
+ * @param cmdDesc CommandDescription
  */
 int LuaSyncedCtrl::InsertUnitCmdDesc(lua_State* L)
 {
