@@ -3616,6 +3616,11 @@ bool CGroundMoveType::WantReverse(const float3& wpDir, const float3& ffDir) cons
 	if (turnRate <= 0.0f)
 		return false;
 
+	// values <= 0 preserve default behavior, values >= 0 could force reverse even in cases of colinear wpDir vs ffDir
+	
+	if (maxReverseDist > 0.0f && minReverseAngle > 0.0f)
+		return (currWayPointDist <= maxReverseDist && turnAngleDeg >= minReverseAngle);
+	
 	if (wpDir.dot(ffDir) >= 0.0f)
 		return false;
 
@@ -3628,9 +3633,7 @@ bool CGroundMoveType::WantReverse(const float3& wpDir, const float3& ffDir) cons
 	const float fwdTurnAngle  = (turnAngleDeg / 360.0f) * SPRING_CIRCLE_DIVS;    // in "headings"
 	const float revTurnAngle  = SPRING_MAX_HEADING - fwdTurnAngle;               // 180 deg - angle
 
-	// values <= 0 preserve default behavior
-	if (maxReverseDist > 0.0f && minReverseAngle > 0.0f)
-		return (currWayPointDist <= maxReverseDist && turnAngleDeg >= minReverseAngle);
+
 
 	// units start accelerating before finishing the turn, so subtract something
 	const float turnTimeMod      = 5.0f;
