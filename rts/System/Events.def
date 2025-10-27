@@ -181,6 +181,8 @@
 
 	SETUP_EVENT(CommandFallback,          MANAGED_BIT | CONTROL_BIT)
 	SETUP_EVENT(AllowCommand,             MANAGED_BIT | CONTROL_BIT)
+	SETUP_EVENT(AllowCommandAutoTargetUnit,   MANAGED_BIT | CONTROL_BIT)
+	SETUP_EVENT(AllowCommandAutoTargetFeature,   MANAGED_BIT | CONTROL_BIT)
 	SETUP_EVENT(AllowUnitCreation,        MANAGED_BIT | CONTROL_BIT)
 	SETUP_EVENT(AllowUnitTransfer,        MANAGED_BIT | CONTROL_BIT)
 	SETUP_EVENT(AllowUnitBuildStep,       MANAGED_BIT | CONTROL_BIT)

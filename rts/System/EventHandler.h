@@ -144,6 +144,8 @@ class CEventHandler
 
 		bool CommandFallback(const CUnit* unit, const Command& cmd);
 		bool AllowCommand(const CUnit* unit, const Command& cmd, int playerNum, bool fromSynced, bool fromLua);
+		bool AllowCommandAutoTargetUnit(const CUnit* unit, const Command& cmd,const CUnit* target, const int cmdID);
+		bool AllowCommandAutoTargetFeature(const CUnit* unit, const Command& cmd,const CFeature* target, const int cmdID);
 
 		std::pair <bool, bool> AllowUnitCreation(const UnitDef* unitDef, const CUnit* builder, const BuildInfo* buildInfo);
 		bool AllowUnitTransfer(const CUnit* unit, int newTeam, bool capture);

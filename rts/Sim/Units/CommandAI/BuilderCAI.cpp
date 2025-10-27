@@ -1399,6 +1399,7 @@ int CBuilderCAI::FindReclaimTarget(const float3& pos, float radius, unsigned cha
 	const bool recEnemyOnly = recoptions & REC_ENEMYONLY;
 	const bool recSpecial   = recoptions & REC_SPECIAL;
 
+	int wantedcmdID = CMD_RECLAIM;
 	const CSolidObject* best = nullptr;
 	float bestDist = bestStartDist;
 	bool stationary = false;
@@ -1433,6 +1434,9 @@ int CBuilderCAI::FindReclaimTarget(const float3& pos, float radius, unsigned cha
 
 				if (!stationary && !u->IsMoving())
 					stationary = true;
+
+				if (!eventHandler.AllowCommandAutoTargetUnit(owner, commandQue.front(), u , wantedcmdID))
+					continue;
 
 				bestDist = dist;
 				best = u;
@@ -1475,6 +1479,9 @@ int CBuilderCAI::FindReclaimTarget(const float3& pos, float radius, unsigned cha
 					continue;
 
 				if (CBuilderCaches::IsFeatureBeingResurrected(f->id, owner))
+					continue;
+
+				if (!eventHandler.AllowCommandAutoTargetFeature(owner, commandQue.front(), f , wantedcmdID))
 					continue;
 
 				metal |= (recSpecial && !metal && f->defResources.metal > 0.0f);
@@ -1528,6 +1535,7 @@ bool CBuilderCAI::FindResurrectableFeatureAndResurrect(
 
 	const CFeature* best = nullptr;
 	float bestDist = 1.0e30f;
+	int wantedcmdID = CMD_RESURRECT;
 
 	for (const CFeature* f: *qfQuery.features) {
 		if (f->udef == nullptr)
@@ -1546,6 +1554,9 @@ bool CBuilderCAI::FindResurrectableFeatureAndResurrect(
 				continue;
 
 			if (!(options & CONTROL_KEY) && CBuilderCaches::IsFeatureBeingReclaimed(f->id, owner))
+				continue;
+
+			if (!eventHandler.AllowCommandAutoTargetFeature(owner, commandQue.front(), f , wantedcmdID))
 				continue;
 
 			bestDist = dist;
@@ -1575,6 +1586,7 @@ bool CBuilderCAI::FindCaptureTargetAndCapture(
 	quadField.GetUnitsExact(qfQuery, pos, radius, false);
 
 	const CUnit* best = nullptr;
+	int wantedcmdID = CMD_CAPTURE;
 	float bestDist = 1.0e30f;
 	bool stationary = false;
 
@@ -1600,6 +1612,9 @@ bool CBuilderCAI::FindCaptureTargetAndCapture(
 
 			if (dist < bestDist || (!stationary && !unit->IsMoving())) {
 				if (!owner->unitDef->canmove && !IsInBuildRange(unit))
+					continue;
+
+				if (!eventHandler.AllowCommandAutoTargetUnit(owner, commandQue.front(), unit, wantedcmdID))
 					continue;
 
 				stationary |= (!stationary && !unit->IsMoving());
@@ -1630,6 +1645,7 @@ bool CBuilderCAI::FindRepairTargetAndRepair(
 	QuadFieldQuery qfQuery;
 	quadField.GetUnitsExact(qfQuery, pos, radius, false);
 	const CUnit* bestUnit = nullptr;
+	int wantedcmdID = CMD_REPAIR;
 
 	const float maxSpeed = owner->moveType->GetMaxSpeed();
 	float unitSpeed = 0.0f;
@@ -1681,6 +1697,9 @@ bool CBuilderCAI::FindRepairTargetAndRepair(
 					if (!(options & CONTROL_KEY) && CBuilderCaches::IsUnitBeingReclaimed(unit, owner))
 						continue;
 
+					if (!eventHandler.AllowCommandAutoTargetUnit(owner, commandQue.front(), unit, wantedcmdID))
+						continue;
+
 					stationary |= (!stationary && !unit->IsMoving());
 
 					bestDist = dist;
@@ -1701,6 +1720,9 @@ bool CBuilderCAI::FindRepairTargetAndRepair(
 
 			if ((dist < bestDist) || !haveEnemy) {
 				if (owner->immobile && ((dist - unit->buildeeRadius) > owner->maxRange))
+					continue;
+
+				if (!eventHandler.AllowCommandAutoTargetUnit(owner, commandQue.front(), unit, wantedcmdID))
 					continue;
 
 				bestUnit = unit;

@@ -665,6 +665,75 @@ bool CSyncedLuaHandle::AllowCommand(const CUnit* unit, const Command& cmd, int p
 	return allow;
 }
 
+/*** Called when engine picked an autotarget for a certain command, before the unit's queue is altered.
+ *
+ * @function SyncedCallins:AllowCommandAutoTarget
+ *
+ * The queue remains untouched when a command is blocked, whether it would be queued or replace the queue.
+ *
+ * @param unitID integer
+ * @param unitDefID integer
+ * @param unitTeam integer
+ * @param cmdID integer
+ * @param cmdParams number[]
+ * @param cmdOptions CommandOptions
+ * @param cmdTag number
+ * @return boolean whether it should be let into the queue.
+ */
+bool CSyncedLuaHandle::AllowCommandAutoTargetUnit(const CUnit* unit, const Command& cmd, const CUnit* target, const int cmdID)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	LUA_CALL_IN_CHECK(L, true);
+	luaL_checkstack(L, 7 + 3, __func__);
+
+	static const LuaHashString cmdStr(__func__);
+	if (!cmdStr.GetGlobalFunc(L))
+		return true; // the call is not defined
+
+	const int argc = LuaUtils::PushUnitAndCommand(L, unit, cmd);
+	
+	lua_pushnumber(L, target->id);
+	lua_pushnumber(L, target->unitDef->id);
+	lua_pushnumber(L, target->team);
+	lua_pushnumber(L, cmdID);
+
+	// call the function
+	if (!RunCallIn(L, cmdStr, argc + 4, 1))
+		return true;
+
+	// get the results
+	const bool allow = luaL_optboolean(L, -1, true);
+	lua_pop(L, 1);
+	return allow;
+}
+
+bool CSyncedLuaHandle::AllowCommandAutoTargetFeature(const CUnit* unit, const Command& cmd, const CFeature* target, const int cmdID)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	LUA_CALL_IN_CHECK(L, true);
+	luaL_checkstack(L, 7 + 3, __func__);
+
+	static const LuaHashString cmdStr(__func__);
+	if (!cmdStr.GetGlobalFunc(L))
+		return true; // the call is not defined
+
+	const int argc = LuaUtils::PushUnitAndCommand(L, unit, cmd);
+	
+	lua_pushnumber(L, target->id);
+	lua_pushnumber(L, target->def->id);
+	lua_pushnumber(L, target->team);
+	lua_pushnumber(L, cmdID);
+
+	// call the function
+	if (!RunCallIn(L, cmdStr, argc + 4, 1))
+		return true;
+
+	// get the results
+	const bool allow = luaL_optboolean(L, -1, true);
+	lua_pop(L, 1);
+	return allow;
+}
+
 
 /*** Called just before unit is created.
  *

@@ -255,6 +255,19 @@ bool CEventHandler::AllowCommand(const CUnit* unit, const Command& cmd, int play
 	return ControlIterateDefTrue(listAllowCommand, &CEventClient::AllowCommand, unit, cmd, playerNum, fromSynced, fromLua);
 }
 
+bool CEventHandler::AllowCommandAutoTargetUnit(const CUnit* unit, const Command& cmd, const CUnit* target, const int cmdID)
+{
+	ZoneScoped;
+	return ControlIterateDefTrue(listAllowCommandAutoTargetUnit, &CEventClient::AllowCommandAutoTargetUnit, unit, cmd, target, cmdID);
+}
+
+bool CEventHandler::AllowCommandAutoTargetFeature(const CUnit* unit, const Command& cmd, const CFeature* target, const int cmdID)
+{
+	ZoneScoped;
+	return ControlIterateDefTrue(listAllowCommandAutoTargetFeature, &CEventClient::AllowCommandAutoTargetFeature, unit, cmd, target, cmdID);
+}
+
+
 
 std::pair <bool, bool> CEventHandler::AllowUnitCreation(const UnitDef* unitDef, const CUnit* builder, const BuildInfo* buildInfo)
 {
