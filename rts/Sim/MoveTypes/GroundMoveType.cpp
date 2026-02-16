@@ -1507,126 +1507,193 @@ void CGroundMoveType::UpdateSkid()
 	ASSERT_SYNCED(owner->midPos);
 
 	const float3& pos = owner->pos;
-	const float4& spd = owner->speed;
+	const float4& inputSpeed = owner->speed;
+	const float3 dir = owner ->frontdir;
+	SetWaypointDir(currWayPoint, pos); // update waypoint dir
+
+	const float3 inputSelfSpeed = inputSpeed.dot(dir)*dir;
+	const float3 inputSkidSpeed = inputSpeed - inputSelfSpeed;
+
+	float3 outputSelfSpeed = inputSelfSpeed;
+	float3 outputSkidSpeed = inputSkidSpeed;
+	float3 outputSpeed = outputSelfSpeed + outputSkidSpeed;
 
 	const float minCollSpeed = owner->unitDef->minCollisionSpeed;
 	const float groundHeight = GetGroundHeight(pos);
 	const float negAltitude = groundHeight - pos.y;
 
-	owner->SetVelocity(
-		spd +
-		owner->GetDragAccelerationVec(
+	const bool isFlying = owner->IsFlying();
+	const bool justHitGround = (isFlying && negAltitude >= 0.0f);
+
+	const float defSkidRecoverFactor = owner->unitDef->skidRecoverFactor;
+	const float defActiveSkidRecover = owner->unitDef->activeSkidRecover;
+
+	if (isFlying) { // I'm flying => Drag + gravity
+		outputSpeed += 	owner->GetDragAccelerationVec(
 			mapInfo->atmosphere.fluidDensity,
 			mapInfo->water.fluidDensity,
 			owner->unitDef->atmosphericDragCoefficient,
 			owner->unitDef->groundFrictionCoefficient
-		)
-	);
-
-	if (owner->IsFlying()) {
-		const float collImpactSpeed = pos.IsInBounds()?
-			-spd.dot(CGround::GetNormal(pos.x, pos.z)):
-			-spd.dot(UpVector);
-		const float impactDamageMul = collImpactSpeed * owner->mass * COLLISION_DAMAGE_MULT;
-
-		if (negAltitude > 0.0f) {
-			// ground impact, stop flying
+		);
+		if (negAltitude > 0.0f) {	// ground impact
+			const float collImpactSpeed = pos.IsInBounds()?
+			-outputSpeed.dot(CGround::GetNormal(pos.x, pos.z)):
+			-outputSpeed.dot(UpVector);
+			const float impactDamageMul = collImpactSpeed * owner->mass * COLLISION_DAMAGE_MULT;
 			owner->ClearPhysicalStateBit(CSolidObject::PSTATE_BIT_FLYING);
-			owner->Move(UpVector * negAltitude, true);
+			owner->Move(UpVector * negAltitude, true); // clamp y pos to ground level
 
-			// deal ground impact damage
-			// TODO:
-			//   bouncing behaves too much like a rubber-ball,
-			//   most impact energy needs to go into the ground
 			if (modInfo.allowUnitCollisionDamage && collImpactSpeed > minCollSpeed && minCollSpeed >= 0.0f)
 				owner->DoDamage(DamageArray(impactDamageMul), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_GROUND, -1);
 
 			skidRotSpeed = 0.0f;
-			// skidRotAccel = 0.0f;
-		} else {
-			owner->SetVelocity(spd + (UpVector * mapInfo->map.gravity));
+		} else { // still falling
+			outputSpeed += UpVector * mapInfo->map.gravity; // add downwards gravity accel
 		}
-	} else {
-		// *assume* this means the unit is still on the ground
-		// (Lua gadgetry can interfere with our "physics" logic)
-		float skidRotSpd = 0.0f;
+
+	} else { // not flying => apply ground drag (orthogonal drag only)
+		float3 totalDragVec = owner->GetDragAccelerationVec(
+			mapInfo->atmosphere.fluidDensity,
+			mapInfo->water.fluidDensity,
+			owner->unitDef->atmosphericDragCoefficient,
+			owner->unitDef->groundFrictionCoefficient
+		);
+		float3 selfDragVec = dir * totalDragVec.dot(dir);
+		float3 skidDragVec = totalDragVec - selfDragVec;
+
+		// render our control constants
+		float maxSpeed = owner->moveType->GetMaxSpeed();
+		float outputSkidSpeedLength = outputSkidSpeed.Length();
+		float outputSelfSpeedLength = outputSelfSpeed.Length();
+		float preControlRatio = 1.0f - std::min(1.0f, outputSkidSpeedLength / maxSpeed);
+		float controlRatio = defActiveSkidRecover!=0.0f? defActiveSkidRecover + (1.0f-defActiveSkidRecover) * preControlRatio : 0.0f;
+
+		float skidRecoverFactor = 1.0f + (defSkidRecoverFactor-1.0f) * preControlRatio; 
+		/* orthogonal drag gets multiplied by our skidRecoverFactor (which is def * control ratio)*/
+		outputSkidSpeed += skidRecoverFactor*skidDragVec;
 
 		const bool onSlope = OnSlope(0.0f);
-		const bool stopSkid = StopSkidding(spd, owner->frontdir);
+		const bool stopSkid = outputSkidSpeed.SqLength() <= 0.1f; // need a better stop skid bool; prolly length vs maxSpeed instead
 
-		if (!onSlope && stopSkid) {
-			skidRotSpd = math::floor(skidRotSpeed + skidRotAccel + 0.5f);
-			skidRotAccel = (skidRotSpd - skidRotSpeed) * 0.5f;
-			skidRotAccel *= math::DEG_TO_RAD;
-
+		if (!onSlope && stopSkid) { // we're aligned enough and not on a slope that might make us start skidding again => skid stop
 			owner->ClearPhysicalStateBit(CSolidObject::PSTATE_BIT_SKIDDING);
 			owner->script->StopSkidding();
-
+			const float fwdSpeed = outputSelfSpeed.dot(dir);
+			outputSelfSpeed = dir * fwdSpeed;
 			UseHeading(true);
-			// update wanted-heading after coming to a stop
 			ChangeHeading(owner->heading);
-		} else {
-			constexpr float speedReduction = 0.35f;
-
-			// number of frames until rotational speed would drop to 0
-			const float speedScale = owner->SetSpeed(spd);
-			const float rotRemTime = std::max(1.0f, speedScale / speedReduction);
-
-			if (onSlope) {
+			outputSkidSpeed = ZeroVector;
+		} else { // we're not aligned	
+			if (onSlope) { // we're onslope, add slope skid
 				const float3& normalVector = CGround::GetNormal(pos.x, pos.z);
 				const float3 normalForce = normalVector * normalVector.dot(UpVector * mapInfo->map.gravity);
 				const float3 newForce = UpVector * mapInfo->map.gravity - normalForce;
 
-				owner->SetVelocity(spd + newForce);
-				owner->SetVelocity(spd * (1.0f - (0.1f * normalVector.y)));
-			} else {
-				// RHS is clamped to 0..1
-				owner->SetVelocity(spd * (1.0f - std::min(1.0f, speedReduction / speedScale)));
+				outputSkidSpeed += newForce;
+				outputSkidSpeed *= 1.0f - (0.1f * normalVector.y);
+				/* since that slope accel might actually be "self speed", we need to recompute outputself and outputskid*/
+				outputSpeed = outputSkidSpeed + outputSelfSpeed;
+				outputSelfSpeed = outputSpeed.dot(dir) * dir;
+				outputSkidSpeed = outputSpeed - outputSelfSpeed;
+			}
+			
+			/*add the longitudinal drag if we're over maxSpeed*/
+			outputSelfSpeedLength = outputSelfSpeed.Length();
+			float deltaspd = maxSpeed - outputSelfSpeedLength;
+			if (deltaspd < 0.0f) { // note this doesnt take into account reverse speed yet
+				outputSelfSpeed += selfDragVec; // we're over maxSpeed so drag kicks in again
+				outputSelfSpeedLength = outputSelfSpeed.Length();
 			}
 
-			skidRotSpd = math::floor(skidRotSpeed + skidRotAccel * (rotRemTime - 1.0f) + 0.5f);
-			skidRotAccel = (skidRotSpd - skidRotSpeed) / rotRemTime;
-			skidRotAccel *= math::DEG_TO_RAD;
+			/* prolly needs to opt out of this whole block if controlRatio == 0*/
+				/* from here*/
 
-			if (math::floor(skidRotSpeed) != math::floor(skidRotSpeed + skidRotAccel)) {
-				skidRotSpeed = 0.0f;
-				skidRotAccel = 0.0f;
+			/*This block sets our control vars for this frame based on state before we started turning/moving*/
+			float modTurnRate = turnRate * controlRatio;
+			float modAccRate = accRate * controlRatio;
+			float modDecRate = decRate * controlRatio;
+
+			/* this turns the unit either towards outputSpeed or towards -outputSkidSpeed, depending on where is the goal*/
+			float3 skidDir = outputSkidSpeed / (outputSkidSpeedLength); // direction of our skid movement
+			float goalSkidDir = (outputSpeed.dot(waypointDir)) / outputSpeed.Length(); // > 0 == skidding towards goal, < 0 == opposite to goal, relative to unit pos in curr frame
+			short unitHeading = owner->heading; // unit current heading
+			float framesToTurn = SPRING_CIRCLE_DIVS / modTurnRate;
+			float turnRadius = std::max((outputSelfSpeedLength * framesToTurn) * math::INVPI2, outputSelfSpeedLength * 1.05f) * 2.f;
+			bool skidToGoal = (goalSkidDir > 0.5f || currWayPointDist > turnRadius);
+			short wantedHeading = skidToGoal? GetHeadingFromVector(outputSpeed.x, outputSpeed.z): GetHeadingFromVector(-outputSkidSpeed.x, -outputSkidSpeed.z);
+			short deltaHeading = (wantedHeading - unitHeading + 32768) % 65536 - 32768;
+			float absDeltaHeading = std::abs(deltaHeading);
+			float sign = deltaHeading/absDeltaHeading;
+			short DeltaHeadingClamp = sign * (std::min(absDeltaHeading, modTurnRate)); // signed deltaHeading with -turnRate,turnRate clamp
+			ChangeHeading(owner->heading + DeltaHeadingClamp); // make sure it updates owner-frontdir
+
+			/*
+			This next block is supposed to handle acceleration and braking towards waypoint
+			there is a subtility since when skidToGoal == false, we're trying to compensate outward skid with our accel,
+			so we need to keep accelerating, not braking, even if goal is behind
+			*/
+			outputSpeed = outputSelfSpeed + outputSkidSpeed;
+			outputSelfSpeed = outputSpeed.dot(dir) * dir;
+			outputSkidSpeed = outputSpeed - outputSelfSpeed;
+			outputSelfSpeedLength = outputSelfSpeed.Length();
+			float goalFront = (waypointDir.dot(outputSpeed) >= 0);
+			{
+				if (skidToGoal && !goalFront) 
+				{
+					outputSelfSpeed = dir * std::max(0.0f, outputSelfSpeedLength - modDecRate); 
+				}
+				else 
+				{
+					outputSelfSpeed = dir * std::min(maxSpeed, outputSelfSpeedLength + modAccRate); 
+				}
 			}
+				/*To here*/
+
 		}
 
-		if (negAltitude < (spd.y + mapInfo->map.gravity)) {
-			owner->SetVelocity(spd + (UpVector * mapInfo->map.gravity));
+		outputSpeed = outputSelfSpeed + outputSkidSpeed; // we recalculate our output speed
+
+		const bool willBeFlying = negAltitude < (outputSpeed.y + mapInfo->map.gravity); // TODO preferably pos at next frame ?
+
+		if (willBeFlying) { // since we will end up being thrown off ground again we need to add gravity accel
+			outputSpeed += UpVector * mapInfo->map.gravity;
 
 			// flying requires skidding and relies on CalcSkidRot
 			owner->SetPhysicalStateBit(CSolidObject::PSTATE_BIT_FLYING);
 			owner->SetPhysicalStateBit(CSolidObject::PSTATE_BIT_SKIDDING);
 
 			UseHeading(false);
-		} else if (negAltitude > spd.y) {
+		} else if (negAltitude > outputSpeed.y) {
 			// LHS is always negative, so this becomes true when the
 			// unit is falling back down and will impact the ground
 			// in one frame
 			const float3& gndNormal = (pos.IsInBounds())? CGround::GetNormal(pos.x, pos.z): UpVector;
-			const float projSpeed = spd.dot(gndNormal);
+			const float projSpeed = outputSpeed.dot(gndNormal);
 
 			if (projSpeed > 0.0f) {
 				// not possible without lateral movement
-				owner->SetVelocity(spd * 0.95f);
+				outputSpeed *= 0.95f;
 			} else {
-				owner->SetVelocity(spd + (gndNormal * (math::fabs(projSpeed) + 0.1f)));
-				owner->SetVelocity(spd * 0.8f);
+				outputSpeed += gndNormal * (math::fabs(projSpeed) + 0.1f);
+				outputSpeed *= 0.8f;
 			}
 		}
 	}
 
-	// finally update speed.w
-	owner->SetSpeed(spd);
-	// translate before rotate, match terrain normal if not in air
-	owner->Move(spd, true);
-	owner->UpdateDirVectors(!owner->upright && owner->IsOnGround(), owner->IsInAir(), owner->unitDef->upDirSmoothing);
+	// always update <oldPos> here so that <speed> does not make
+	// extreme jumps when the unit transitions from skidding back
+	// to non-skidding
+	// do it before we move so OwnerMoved post skidding will still see last frame's movement
 
+	oldPos = owner->pos;
+	owner->SetVelocity(outputSpeed);
+	// finally update speed.w
+	owner->SetSpeed(outputSpeed);
+	// translate before rotate, match terrain normal if not in air
+	owner->Move(outputSpeed, true);
+	owner->UpdateDirVectors(!owner->upright && owner->IsOnGround(), owner->IsInAir(), owner->unitDef->upDirSmoothing);
 	if (owner->IsSkidding()) {
-		CalcSkidRot();
+		//CalcSkidRot(); REMOVED FOR NOW, NEED TO MAKE IT COMPAT WITH NEW CODE
 		CheckCollisionSkid();
 	} else {
 		// do this here since ::Update returns early if it calls us
@@ -1635,12 +1702,7 @@ void CGroundMoveType::UpdateSkid()
 
 	AdjustPosToWaterLine();
 
-	// always update <oldPos> here so that <speed> does not make
-	// extreme jumps when the unit transitions from skidding back
-	// to non-skidding
-	oldPos = owner->pos;
-
-	ASSERT_SANE_OWNER_SPEED(spd);
+	ASSERT_SANE_OWNER_SPEED(outputSelfSpeed);
 	ASSERT_SYNCED(owner->midPos);
 }
 
