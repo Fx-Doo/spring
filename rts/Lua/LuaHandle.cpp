@@ -1220,6 +1220,32 @@ void CLuaHandle::UnitDestroyed(const CUnit* unit, const CUnit* attacker, int wea
 	RunCallInTraceback(L, cmdStr, argCount, 0, traceBack.GetErrFuncIdx(), false);
 }
 
+void CLuaHandle::UnitDestroyed(const CUnit* unit, int attackerTeamID, int weaponDefID)
+{
+	LUA_CALL_IN_CHECK(L);
+	luaL_checkstack(L, 9, __func__);
+
+	const LuaUtils::ScopedDebugTraceBack traceBack(L);
+
+	static const LuaHashString cmdStr(__func__);
+
+	if (!cmdStr.GetGlobalFunc(L))
+		return;
+
+	static constexpr int argCount = 3 + 3 + 1;
+
+	lua_pushnumber(L, unit->id);
+	lua_pushnumber(L, unit->unitDef->id);
+	lua_pushnumber(L, unit->team);
+
+	LuaUtils::PushAttackerTeamInfo(L, attackerTeamID);
+
+	lua_pushnumber(L, weaponDefID);
+
+	// call the routine
+	RunCallInTraceback(L, cmdStr, argCount, 0, traceBack.GetErrFuncIdx(), false);
+}
+
 
 /*** Called when a unit is transferred between teams. This is called before `UnitGiven` and in that moment unit is still assigned to the oldTeam.
  *
@@ -1400,6 +1426,40 @@ void CLuaHandle::UnitDamaged(
 	lua_pushnumber(L, projectileID);
 
 	LuaUtils::PushAttackerInfo(L, attacker);
+
+	// call the routine
+	RunCallInTraceback(L, cmdStr, argCount, 0, traceBack.GetErrFuncIdx(), false);
+}
+
+void CLuaHandle::UnitDamaged(
+	const CUnit* unit,
+	int attackerTeamID,
+	float damage,
+	int weaponDefID,
+	int projectileID,
+	bool paralyzer)
+{
+	LUA_CALL_IN_CHECK(L);
+	luaL_checkstack(L, 11, __func__);
+
+	static const LuaHashString cmdStr(__func__);
+	const LuaUtils::ScopedDebugTraceBack traceBack(L);
+
+	if (!cmdStr.GetGlobalFunc(L))
+		return;
+
+	static constexpr int argCount = 7 + 3;
+
+	lua_pushnumber(L, unit->id);
+	lua_pushnumber(L, unit->unitDef->id);
+	lua_pushnumber(L, unit->team);
+	lua_pushnumber(L, damage);
+	lua_pushboolean(L, paralyzer);
+	// these two do not count as information leaks
+	lua_pushnumber(L, weaponDefID);
+	lua_pushnumber(L, projectileID);
+
+	LuaUtils::PushAttackerTeamInfo(L, attackerTeamID);
 
 	// call the routine
 	RunCallInTraceback(L, cmdStr, argCount, 0, traceBack.GetErrFuncIdx(), false);
@@ -2100,6 +2160,38 @@ void CLuaHandle::FeatureDamaged(
 	lua_pushnumber(L, projectileID);
 
 	LuaUtils::PushAttackerInfo(L, attacker);
+
+	// call the routine
+	RunCallInTraceback(L, cmdStr, argCount, 0, traceBack.GetErrFuncIdx(), false);
+}
+
+void CLuaHandle::FeatureDamaged(
+	const CFeature* feature,
+	int attackerTeamID,
+	float damage,
+	int weaponDefID,
+	int projectileID)
+{
+	LUA_CALL_IN_CHECK(L);
+	luaL_checkstack(L, 11, __func__);
+	const LuaUtils::ScopedDebugTraceBack traceBack(L);
+
+	static const LuaHashString cmdStr(__func__);
+	if (!cmdStr.GetGlobalFunc(L))
+		return;
+
+	int argCount = 6 + 3;
+
+	lua_pushnumber(L, feature->id);
+	lua_pushnumber(L, feature->def->id);
+	lua_pushnumber(L, feature->team);
+	lua_pushnumber(L, damage);
+
+	// these two do not count as information leaks
+	lua_pushnumber(L, weaponDefID);
+	lua_pushnumber(L, projectileID);
+
+	LuaUtils::PushAttackerTeamInfo(L, attackerTeamID);
 
 	// call the routine
 	RunCallInTraceback(L, cmdStr, argCount, 0, traceBack.GetErrFuncIdx(), false);

@@ -620,8 +620,8 @@ bool CStrafeAirMoveType::HandleCollisions(bool checkCollisions) {
 					owner->SetVelocity(owner->speed * 0.99f);
 
 					if (modInfo.allowUnitCollisionDamage) {
-						owner->DoDamage(DamageArray(damage), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
-						unit->DoDamage(DamageArray(damage), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
+						owner->InputDoDamage(DamageArray(damage), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
+						unit->InputDoDamage(DamageArray(damage), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
 					}
 
 					hitBuilding = true;
@@ -636,8 +636,8 @@ bool CStrafeAirMoveType::HandleCollisions(bool checkCollisions) {
 						unit->Move(dif * (dist - totRad) * (part), true);
 
 					if (modInfo.allowUnitCollisionDamage) {
-						owner->DoDamage(DamageArray(damage), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
-						unit->DoDamage(DamageArray(damage), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
+						owner->InputDoDamage(DamageArray(damage), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
+						unit->InputDoDamage(DamageArray(damage), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
 					}
 				}
 			}

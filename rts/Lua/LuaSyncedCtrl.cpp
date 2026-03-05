@@ -4387,7 +4387,7 @@ int LuaSyncedCtrl::AddUnitDamage(lua_State* L)
 	if (paralyze)
 		damages.paralyzeDamageTime = paralyze;
 
-	unit->DoDamage(damages, impulse, attacker, weaponDefID, -1);
+	unit->InputDoDamage(damages, impulse, attacker, weaponDefID, -1);
 	return 0;
 }
 
@@ -7589,6 +7589,7 @@ int LuaSyncedCtrl::SpawnExplosion(lua_State* L)
 			.damages              = damages,
 			.weaponDef            = nullptr,
 			.owner                = nullptr,
+			.ownerTeamID          = -1,
 			.hitObject            = ExplosionHitObject(),
 			.craterAreaOfEffect   = 0.0f,
 			.damageAreaOfEffect   = 0.0f,
@@ -7614,6 +7615,7 @@ int LuaSyncedCtrl::SpawnExplosion(lua_State* L)
 		// parse remaining arguments in order of expected usage frequency
 		params.weaponDef  = weaponDefHandler->GetWeaponDefByID(luaL_optint(L, 16, -1));
 		params.owner      = ParseUnit   (L, __func__, 18);
+		params.ownerTeamID = (params.owner != nullptr)? params.owner->team : -1;
 		params.hitObject  = ParseUnit   (L, __func__, 19);
 		params.hitObject  = ParseFeature(L, __func__, 20);
 		//params.hitWeapon = nullptr; // not implemented

@@ -70,6 +70,7 @@ class CEventHandler
 		void UnitConstructionDecayed(const CUnit* unit, float timeSinceLastBuild, float iterationPeriod, float part);
 		void UnitFromFactory(const CUnit* unit, const CUnit* factory, bool userOrders);
 		void UnitDestroyed(const CUnit* unit, const CUnit* attacker, int weaponDefID);
+		void UnitDestroyed(const CUnit* unit, int attackerTeamID, int weaponDefID);
 		void UnitTaken(const CUnit* unit, int oldTeam, int newTeam);
 		void UnitGiven(const CUnit* unit, int oldTeam, int newTeam);
 
@@ -90,6 +91,13 @@ class CEventHandler
 		void UnitDamaged(
 			const CUnit* unit,
 			const CUnit* attacker,
+			float damage,
+			int weaponDefID,
+			int projectileID,
+			bool paralyzer);
+		void UnitDamaged(
+			const CUnit* unit,
+			int attackerTeamID,
 			float damage,
 			int weaponDefID,
 			int projectileID,
@@ -129,6 +137,12 @@ class CEventHandler
 		void FeatureDamaged(
 			const CFeature* feature,
 			const CUnit* attacker,
+			float damage,
+			int weaponDefID,
+			int projectileID);
+		void FeatureDamaged(
+			const CFeature* feature,
+			int attackerTeamID,
 			float damage,
 			int weaponDefID,
 			int projectileID);
@@ -421,6 +435,20 @@ inline void CEventHandler::UnitDestroyed(const CUnit* unit, const CUnit* attacke
 	ITERATE_UNIT_ALLYTEAM_EVENTCLIENTLIST(UnitDestroyed, unit, attacker, weaponDefID)
 }
 
+inline void CEventHandler::UnitDestroyed(const CUnit* unit, int attackerTeamID, int weaponDefID)
+{
+	const auto unitAllyTeam = unit->allyteam;
+	for (size_t i = 0; i < listUnitDestroyed.size(); ) {
+		CEventClient* ec = listUnitDestroyed[i];
+
+		if (ec->CanReadAllyTeam(unitAllyTeam))
+			ec->UnitDestroyed(unit, attackerTeamID, weaponDefID);
+
+		/* the call-in may remove itself from the list */
+		i += (i < listUnitDestroyed.size() && ec == listUnitDestroyed[i]);
+	}
+}
+
 #define UNIT_CALLIN_NO_PARAM(name)                                 \
 	inline void CEventHandler:: name (const CUnit* unit)           \
 	{                                                              \
@@ -555,6 +583,26 @@ inline void CEventHandler::UnitDamaged(
 	ITERATE_UNIT_ALLYTEAM_EVENTCLIENTLIST(UnitDamaged, unit, attacker, damage, weaponDefID, projectileID, paralyzer)
 }
 
+inline void CEventHandler::UnitDamaged(
+	const CUnit* unit,
+	int attackerTeamID,
+	float damage,
+	int weaponDefID,
+	int projectileID,
+	bool paralyzer)
+{
+	const auto unitAllyTeam = unit->allyteam;
+	for (size_t i = 0; i < listUnitDamaged.size(); ) {
+		CEventClient* ec = listUnitDamaged[i];
+
+		if (ec->CanReadAllyTeam(unitAllyTeam))
+			ec->UnitDamaged(unit, attackerTeamID, damage, weaponDefID, projectileID, paralyzer);
+
+		/* the call-in may remove itself from the list */
+		i += (i < listUnitDamaged.size() && ec == listUnitDamaged[i]);
+	}
+}
+
 inline void CEventHandler::UnitStunned(
 	const CUnit* unit,
 	bool stunned)
@@ -653,6 +701,24 @@ inline void CEventHandler::FeatureDamaged(
 
 		if (featureAllyTeam < 0 || ec->CanReadAllyTeam(featureAllyTeam))
 			ec->FeatureDamaged(feature, attacker, damage, weaponDefID, projectileID);
+	}
+}
+
+inline void CEventHandler::FeatureDamaged(
+	const CFeature* feature,
+	int attackerTeamID,
+	float damage,
+	int weaponDefID,
+	int projectileID)
+{
+	const int featureAllyTeam = feature->allyteam;
+	const size_t count = listFeatureDamaged.size();
+
+	for (size_t i = 0; i < count; i++) {
+		CEventClient* ec = listFeatureDamaged[i];
+
+		if (featureAllyTeam < 0 || ec->CanReadAllyTeam(featureAllyTeam))
+			ec->FeatureDamaged(feature, attackerTeamID, damage, weaponDefID, projectileID);
 	}
 }
 

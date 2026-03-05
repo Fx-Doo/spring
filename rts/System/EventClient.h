@@ -132,6 +132,7 @@ class CEventClient
 		virtual void UnitConstructionDecayed(const CUnit* unit, float timeSinceLastBuild, float iterationPeriod, float part) {}
 		virtual void UnitFromFactory(const CUnit* unit, const CUnit* factory, bool userOrders) {}
 		virtual void UnitDestroyed(const CUnit* unit, const CUnit* attacker, int weaponDefID) {}
+		virtual void UnitDestroyed(const CUnit* unit, int attackerTeamID, int weaponDefID) {}
 		virtual void UnitTaken(const CUnit* unit, int oldTeam, int newTeam) {}
 		virtual void UnitGiven(const CUnit* unit, int oldTeam, int newTeam) {}
 
@@ -141,6 +142,13 @@ class CEventClient
 		virtual void UnitDamaged(
 			const CUnit* unit,
 			const CUnit* attacker,
+			float damage,
+			int weaponDefID,
+			int projectileID,
+			bool paralyzer) {}
+		virtual void UnitDamaged(
+			const CUnit* unit,
+			int attackerTeamID,
 			float damage,
 			int weaponDefID,
 			int projectileID,
@@ -184,6 +192,12 @@ class CEventClient
 		virtual void FeatureDamaged(
 			const CFeature* feature,
 			const CUnit* attacker,
+			float damage,
+			int weaponDefID,
+			int projectileID) {}
+		virtual void FeatureDamaged(
+			const CFeature* feature,
+			int attackerTeamID,
 			float damage,
 			int weaponDefID,
 			int projectileID) {}

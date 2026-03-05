@@ -1539,7 +1539,7 @@ void CGroundMoveType::UpdateSkid()
 			//   bouncing behaves too much like a rubber-ball,
 			//   most impact energy needs to go into the ground
 			if (modInfo.allowUnitCollisionDamage && collImpactSpeed > minCollSpeed && minCollSpeed >= 0.0f)
-				owner->DoDamage(DamageArray(impactDamageMul), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_GROUND, -1);
+				owner->InputDoDamage(DamageArray(impactDamageMul), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_GROUND, -1);
 
 			skidRotSpeed = 0.0f;
 			// skidRotAccel = 0.0f;
@@ -1716,11 +1716,11 @@ void CGroundMoveType::CheckCollisionSkid()
 
 			// damage the collider, no added impulse
 			if (modInfo.allowUnitCollisionDamage && collImpactSpeed > colliderMinCollSpeed && colliderMinCollSpeed >= 0.0f)
-				collider->DoDamage(DamageArray(impactDamageMul), ZeroVector, collidee, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
+				collider->InputDoDamage(DamageArray(impactDamageMul), ZeroVector, collidee, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
 
 			// damage the (static) collidee based on collider's mass, no added impulse
 			if (modInfo.allowUnitCollisionDamage && collImpactSpeed > (collideeMinCollSpeed = collideeUD->minCollisionSpeed) && collideeMinCollSpeed >= 0.0f)
-				collidee->DoDamage(DamageArray(impactDamageMul), ZeroVector, collider, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
+				collidee->InputDoDamage(DamageArray(impactDamageMul), ZeroVector, collider, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
 
 			collider->Move(collSeparationDir * collImpactSpeed, true);
 			collider->SetVelocity(collider->speed + ((collSeparationDir * collImpactSpeed) * 1.8f));
@@ -1746,11 +1746,11 @@ void CGroundMoveType::CheckCollisionSkid()
 
 			// damage the collider
 			if (modInfo.allowUnitCollisionDamage && collImpactSpeed > colliderMinCollSpeed && colliderMinCollSpeed >= 0.0f)
-				collider->DoDamage(DamageArray(colliderImpactDmgMult), collSeparationDir * colliderImpactDmgMult, collidee, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
+				collider->InputDoDamage(DamageArray(colliderImpactDmgMult), collSeparationDir * colliderImpactDmgMult, collidee, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
 
 			// damage the collidee
 			if (modInfo.allowUnitCollisionDamage && collImpactSpeed > (collideeMinCollSpeed = collideeUD->minCollisionSpeed) && collideeMinCollSpeed >= 0.0f)
-				collidee->DoDamage(DamageArray(collideeImpactDmgMult), collSeparationDir * -collideeImpactDmgMult, collider, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
+				collidee->InputDoDamage(DamageArray(collideeImpactDmgMult), collSeparationDir * -collideeImpactDmgMult, collider, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
 
 			collider->Move( colliderImpactImpulse, true);
 			collidee->Move(-collideeImpactImpulse, true);
@@ -1781,7 +1781,7 @@ void CGroundMoveType::CheckCollisionSkid()
 		// the collidee feature can not be passed along to the collider as attacker
 		// yet, keep symmetry and do not pass collider along to the collidee either
 		if (modInfo.allowUnitCollisionDamage && collImpactSpeed > colliderMinCollSpeed && colliderMinCollSpeed >= 0.0f)
-			collider->DoDamage(DamageArray(impactDamageMul), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
+			collider->InputDoDamage(DamageArray(impactDamageMul), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
 
 		// damage the collidee feature based on collider's mass
 		collidee->DoDamage(DamageArray(impactDamageMul), -impactImpulse, nullptr, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);

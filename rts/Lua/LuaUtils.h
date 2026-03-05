@@ -193,10 +193,7 @@ class LuaUtils {
 		static void PushAttackerDef(lua_State* L, const CUnit& attacker);
 		static void PushAttackerDef(lua_State* L, const CUnit* const attacker);
 		static void PushAttackerInfo(lua_State* L, const CUnit* const attacker);
-#endif
-
-		template<typename ...Args>
-		static void SolLuaError(const char* format, Args&& ...args)
+	static void PushAttackerTeamInfo(lua_State* L, int attackerTeamID);
 		{
 			std::string what = fmt::sprintf(format, std::forward<Args>(args)...);
 			throw std::runtime_error(what.c_str());

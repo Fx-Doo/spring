@@ -99,6 +99,7 @@ void CLightningCannon::FireImpl(const bool scriptCall)
 		.damages              = damageArray,
 		.weaponDef            = weaponDef,
 		.owner                = owner,
+		.ownerTeamID          = (owner != nullptr)? owner->team : -1,
 		.hitObject            = ExplosionHitObject(hitUnit, hitFeature, hitShield),
 		.craterAreaOfEffect   = damages->craterAreaOfEffect,
 		.damageAreaOfEffect   = damages->damageAreaOfEffect,
