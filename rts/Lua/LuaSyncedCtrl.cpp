@@ -4412,12 +4412,12 @@ int LuaSyncedCtrl::AddUnitDamage(lua_State* L)
 
 	// Determine which damage pathway to use
 	if (attacker != nullptr) {
-		unit->InputDoDamage(damages, impulse, attacker, weaponDefID, -1);
+		unit->InputDoDamage(damages, impulse, attacker, weaponDefID, -1, -1);
 	} else if (attackerTeam >= 0) {
-		unit->InputDoDamage(damages, impulse, attackerTeam, weaponDefID, -1);
+		unit->InputDoDamage(damages, impulse, nullptr, weaponDefID, -1, attackerTeam);
 	} else {
 		// Gaia damage
-		unit->InputDoDamage(damages, impulse, -1, weaponDefID, -1);
+		unit->InputDoDamage(damages, impulse, nullptr, weaponDefID, -1, -1);
 	}
 	return 0;
 }

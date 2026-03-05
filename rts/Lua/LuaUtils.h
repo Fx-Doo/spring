@@ -153,6 +153,12 @@ class LuaUtils {
 		static int Log(lua_State* L);
 		static bool PushLogEntries(lua_State* L);
 
+		// Format and log an error message (without needing lua_State)
+		template<typename... Args>
+		static void SolLuaError(const char* format, Args... args) {
+			LOG_L(L_ERROR, fmt::sprintf(format, args...));
+		}
+
 		static bool PushCustomBaseFunctions(lua_State* L);
 
 		static int ParseIntArray(lua_State* L, int tableIndex,
