@@ -1952,7 +1952,7 @@ void LuaUtils::PushAttackerDef(lua_State* L, const CUnit& attacker)
 	lua_pushnil(L);
 }
 
-void LuaUtils::PushAttackerInfo(lua_State* L, const CUnit* const attacker, int attackerTeamID)
+void LuaUtils::PushAttackerInfo(lua_State* L, const CUnit* const attacker)
 {
 	if (attacker && IsUnitVisible(L, attacker)) {
 		lua_pushnumber(L, attacker->id);
@@ -1963,7 +1963,7 @@ void LuaUtils::PushAttackerInfo(lua_State* L, const CUnit* const attacker, int a
 
 	lua_pushnil(L);
 	lua_pushnil(L);
-	lua_pushnil(attackerTeamID);
+	lua_pushnil(L);
 }
 #endif
 

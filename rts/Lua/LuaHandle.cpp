@@ -1194,7 +1194,7 @@ void CLuaHandle::UnitConstructionDecayed(const CUnit* unit, float timeSinceLastB
  * @param attackerTeam number
  * @param weaponDefID integer
  */
-void CLuaHandle::UnitDestroyed(const CUnit* unit, const CUnit* attacker, int weaponDefID, int attackerTeamID)
+void CLuaHandle::UnitDestroyed(const CUnit* unit, const CUnit* attacker, int weaponDefID)
 {
 	LUA_CALL_IN_CHECK(L);
 	luaL_checkstack(L, 9, __func__);
@@ -1212,7 +1212,7 @@ void CLuaHandle::UnitDestroyed(const CUnit* unit, const CUnit* attacker, int wea
 	lua_pushnumber(L, unit->unitDef->id);
 	lua_pushnumber(L, unit->team);
 
-	LuaUtils::PushAttackerInfo(L, attacker, attackerTeamID);
+	LuaUtils::PushAttackerInfo(L, attacker);
 
 	lua_pushnumber(L, weaponDefID);
 
@@ -1377,8 +1377,7 @@ void CLuaHandle::UnitDamaged(
 	float damage,
 	int weaponDefID,
 	int projectileID,
-	bool paralyzer,
-	int attackerTeamID)
+	bool paralyzer)
 {
 	LUA_CALL_IN_CHECK(L);
 	luaL_checkstack(L, 11, __func__);
@@ -1400,7 +1399,7 @@ void CLuaHandle::UnitDamaged(
 	lua_pushnumber(L, weaponDefID);
 	lua_pushnumber(L, projectileID);
 
-	LuaUtils::PushAttackerInfo(L, attacker, attackerTeamID);
+	LuaUtils::PushAttackerInfo(L, attacker);
 
 	// call the routine
 	RunCallInTraceback(L, cmdStr, argCount, 0, traceBack.GetErrFuncIdx(), false);
@@ -2079,8 +2078,7 @@ void CLuaHandle::FeatureDamaged(
 	const CUnit* attacker,
 	float damage,
 	int weaponDefID,
-	int projectileID
-	int attaclerTeamID)
+	int projectileID)
 {
 	LUA_CALL_IN_CHECK(L);
 	luaL_checkstack(L, 11, __func__);
@@ -2101,7 +2099,7 @@ void CLuaHandle::FeatureDamaged(
 	lua_pushnumber(L, weaponDefID);
 	lua_pushnumber(L, projectileID);
 
-	LuaUtils::PushAttackerInfo(L, attacker, attackerTeamID);
+	LuaUtils::PushAttackerInfo(L, attacker);
 
 	// call the routine
 	RunCallInTraceback(L, cmdStr, argCount, 0, traceBack.GetErrFuncIdx(), false);

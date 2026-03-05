@@ -77,7 +77,7 @@ void CGameHelper::Update()
 		if (attackee == nullptr)
 			continue;
 
-		attackee->DoDamage(wd.damage, wd.impulse, attacker, wd.weaponID, wd.projectileID, wd.attackerTeamID);
+		attackee->DoDamage(wd.damage, wd.impulse, attacker, wd.weaponID, wd.projectileID);
 	}
 
 	waitingDamages[wdIdx].clear();
@@ -114,8 +114,7 @@ void CGameHelper::DoExplosionDamage(
 	const bool ignoreOwner,
 	const DamageArray& damages,
 	const int weaponDefID,
-	const int projectileID,
-	const int attackerTeamID
+	const int projectileID
 ) {
 	RECOIL_DETAILED_TRACY_ZONE;
 	assert(unit != nullptr);
@@ -165,10 +164,10 @@ void CGameHelper::DoExplosionDamage(
 
 	if (expDist < (expSpeed * DIRECT_EXPLOSION_DAMAGE_SPEED_SCALE)) {
 		// damage directly
-		unit->DoDamage(expDamages, expImpulse, owner, weaponDefID, projectileID, attackerTeamID);
+		unit->DoDamage(expDamages, expImpulse, owner, weaponDefID, projectileID);
 	} else {
 		// damage later
-		waitingDamages[(gs->frameNum + int(expDist / expSpeed) - (DIRECT_EXPLOSION_DAMAGE_SPEED_SCALE - 1)) & (waitingDamages.size() - 1)].emplace_back(std::move(expDamages), expImpulse, ((owner != nullptr)? owner->id: -1), unit->id, weaponDefID, projectileID, attackerTeamID);
+		waitingDamages[(gs->frameNum + int(expDist / expSpeed) - (DIRECT_EXPLOSION_DAMAGE_SPEED_SCALE - 1)) & (waitingDamages.size() - 1)].emplace_back(std::move(expDamages), expImpulse, ((owner != nullptr)? owner->id: -1), unit->id, weaponDefID, projectileID);
 	}
 }
 
@@ -237,7 +236,7 @@ void CGameHelper::DamageObjectsInExplosionRadius(
 	//   not keep track of end-markers --> certain objects
 	//   would not be damaged AT ALL (!)
 	for (unsigned int n = oldNumUnits; n < newNumUnits; n++)
-		DoExplosionDamage(unitCache[n], params.owner, params.pos, expRad, params.explosionSpeed, params.edgeEffectiveness, params.ignoreOwner, params.damages, weaponDefID, params.projectileID, params.teamID);
+		DoExplosionDamage(unitCache[n], params.owner, params.pos, expRad, params.explosionSpeed, params.edgeEffectiveness, params.ignoreOwner, params.damages, weaponDefID, params.projectileID);
 
 	unitCache.resize(oldNumUnits);
 
@@ -284,8 +283,7 @@ void CGameHelper::Explosion(const CExplosionParams& params) {
 				params.ignoreOwner,
 				params.damages,
 				weaponDefID,
-				params.projectileID,
-				params.teamID
+				params.projectileID
 			);
 		}
 
