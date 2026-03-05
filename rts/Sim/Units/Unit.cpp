@@ -939,10 +939,9 @@ void CUnit::ReleaseTransportees(CTeam* attackerTeam, bool selfDestruct, bool rec
 
 	transportedUnits.clear();
 }
-			}
-		}
-	}
 
+void CUnit::UpdateLosStuff(int at, int newStatus)
+{
 	// remove from the state after running the callins
 	losStatus[at] &= newStatus;
 }
