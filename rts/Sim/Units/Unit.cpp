@@ -940,7 +940,7 @@ void CUnit::ReleaseTransportees(CTeam* attackerTeam, bool selfDestruct, bool rec
 	transportedUnits.clear();
 }
 
-void CUnit::UpdateLosStuff(int at, int newStatus)
+void CUnit::SetLosStatus(int at, unsigned short newStatus)
 {
 	// remove from the state after running the callins
 	losStatus[at] &= newStatus;
