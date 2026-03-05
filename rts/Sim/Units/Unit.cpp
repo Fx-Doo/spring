@@ -456,7 +456,7 @@ void CUnit::FinishedBuilding(bool postInit)
 		f->blockHeightChanges = true;
 
 		UnBlock();
-		KillUnit(nullptr, false, true, -CSolidObject::DAMAGE_TURNED_INTO_FEATURE);
+		KillUnit((CUnit*)nullptr, false, true, -CSolidObject::DAMAGE_TURNED_INTO_FEATURE);
 	}
 }
 
@@ -1007,7 +1007,7 @@ void CUnit::SlowUpdate()
 	DoWaterDamage();
 
 	if (health < 0.0f) {
-		KillUnit(nullptr, false, true, -CSolidObject::DAMAGE_NEGATIVE_HEALTH);
+		KillUnit((CUnit*)nullptr, false, true, -CSolidObject::DAMAGE_NEGATIVE_HEALTH);
 		return;
 	}
 
@@ -1044,7 +1044,7 @@ void CUnit::SlowUpdate()
 	if (selfDCountdown > 0) {
 		if ((selfDCountdown -= 1) == 0) {
 			// avoid unfinished buildings making an explosion
-			KillUnit(nullptr, !beingBuilt, beingBuilt, -CSolidObject::DAMAGE_SELFD_EXPIRED);
+			KillUnit((CUnit*)nullptr, !beingBuilt, beingBuilt, -CSolidObject::DAMAGE_SELFD_EXPIRED);
 			return;
 		}
 
@@ -1072,7 +1072,7 @@ void CUnit::SlowUpdate()
 			);
 
 			if (health <= 0.0f || buildProgress <= 0.0f)
-				KillUnit(nullptr, false, true, -CSolidObject::DAMAGE_CONSTRUCTION_DECAY);
+				KillUnit((CUnit*)nullptr, false, true, -CSolidObject::DAMAGE_CONSTRUCTION_DECAY);
 		}
 		moveType->SlowUpdate();
 
@@ -1170,7 +1170,7 @@ void CUnit::SlowUpdateKamikaze(bool scanForTargets)
 				continue;
 
 			// (by default) self-destruct when target starts moving away from us, should maximize damage
-			KillUnit(nullptr, true, false, -CSolidObject::DAMAGE_KAMIKAZE_ACTIVATED);
+			KillUnit((CUnit*)nullptr, true, false, -CSolidObject::DAMAGE_KAMIKAZE_ACTIVATED);
 			return;
 		}
 	}
@@ -1194,7 +1194,7 @@ void CUnit::SlowUpdateKamikaze(bool scanForTargets)
 	if (!kill)
 		return;
 
-	KillUnit(nullptr, true, false, -CSolidObject::DAMAGE_KAMIKAZE_ACTIVATED);
+	KillUnit((CUnit*)nullptr, true, false, -CSolidObject::DAMAGE_KAMIKAZE_ACTIVATED);
 }
 
 
@@ -1544,14 +1544,14 @@ void CUnit::DoDamage(
 	if (health > 0.0f)
 		return;
 
-	KillUnit(nullptr, false, false, weaponDefID);
+	KillUnit((CUnit*)nullptr, false, false, weaponDefID);
 
 	if (!isDead)
 		return;
 	if (beingBuilt)
 		return;
 
-	if (teamHandler.Ally(allyteam, attackerTeam->team))
+	if (teamHandler.Ally(allyteam, teamHandler.AllyTeam(attackerTeam->teamNum)))
 		return;
 
 	TeamStatistics& attackerStats = attackerTeam->GetCurrentStats();
@@ -1589,7 +1589,7 @@ void CUnit::DoDamage(
 
 	script->WorldHitByWeapon(-(impulse * impulseMult).SafeNormalize2D(), weaponDefID, /*inout*/ baseDamage);
 	ApplyImpulse((impulse * impulseMult) / mass);
-	ApplyDamage(nullptr, damages, baseDamage, experienceMod);
+	ApplyDamage((CUnit*)nullptr, damages, baseDamage, experienceMod);
 
 	{
 		eventHandler.UnitDamaged(this, nullptr, baseDamage, weaponDefID, projectileID, isParalyzer);
@@ -1610,7 +1610,7 @@ void CUnit::DoDamage(
 	if (health > 0.0f)
 		return;
 
-	KillUnit(nullptr, false, false, weaponDefID);
+	KillUnit((CUnit*)nullptr, false, false, weaponDefID);
 
 	if (!isDead)
 		return;

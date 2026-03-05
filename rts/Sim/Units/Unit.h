@@ -27,6 +27,7 @@
 #include "Sim/Units/Scripts/LuaUnitScript.h"
 
 class CTeam;
+class CPlayer;
 class CCommandAI;
 class CGroup;
 class CMissileProjectile;
@@ -142,6 +143,7 @@ public:
 
 	void UpdateTransportees();
 	void ReleaseTransportees(CUnit* attacker, bool selfDestruct, bool reclaimed);
+	void ReleaseTransportees(CTeam* attackerTeam, bool selfDestruct, bool reclaimed);
 	void TransporteeKilled(const CObject* o);
 
 	void AddExperience(float exp);

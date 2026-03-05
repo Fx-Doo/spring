@@ -264,9 +264,30 @@ class CEventClient
 			float* impulseMult
 		) { return false; }
 
+		virtual bool UnitPreDamaged(
+			const CUnit* unit,
+			int attackerTeamID,
+			float damage,
+			int weaponDefID,
+			int projectileID,
+			bool paralyzer,
+			float* newDamage,
+			float* impulseMult
+		) { return false; }
+
 		virtual bool FeaturePreDamaged(
 			const CFeature* feature,
 			const CUnit* attacker,
+			float damage,
+			int weaponDefID,
+			int projectileID,
+			float* newDamage,
+			float* impulseMult
+		) { return false; }
+
+		virtual bool FeaturePreDamaged(
+			const CFeature* feature,
+			int attackerTeamID,
 			float damage,
 			int weaponDefID,
 			int projectileID,

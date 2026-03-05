@@ -210,6 +210,15 @@ class CEventHandler
 			float* newDamage,
 			float* impulseMult
 		);
+		bool FeaturePreDamaged(
+			const CFeature* feature,
+			int attackerTeamID,
+			float damage,
+			int weaponDefID,
+			int projectileID,
+			float* newDamage,
+			float* impulseMult
+		);
 
 		bool ShieldPreDamaged(
 			const CProjectile* projectile,
@@ -684,6 +693,52 @@ inline void CEventHandler::FeatureDestroyed(const CFeature* feature)
 		if ((featureAllyTeam < 0) || ec->CanReadAllyTeam(featureAllyTeam))
 			ec->FeatureDestroyed(feature);
 	}
+}
+
+inline bool CEventHandler::FeaturePreDamaged(
+	const CFeature* feature,
+	const CUnit* attacker,
+	float damage,
+	int weaponDefID,
+	int projectileID,
+	float* newDamage,
+	float* impulseMult)
+{
+	const int featureAllyTeam = feature->allyteam;
+	const size_t count = listFeaturePreDamaged.size();
+
+	for (size_t i = 0; i < count; i++) {
+		CEventClient* ec = listFeaturePreDamaged[i];
+
+		if ((featureAllyTeam < 0) || ec->CanReadAllyTeam(featureAllyTeam)) {
+			if (ec->FeaturePreDamaged(feature, attacker, damage, weaponDefID, projectileID, newDamage, impulseMult))
+				return true;
+		}
+	}
+	return false;
+}
+
+inline bool CEventHandler::FeaturePreDamaged(
+	const CFeature* feature,
+	int attackerTeamID,
+	float damage,
+	int weaponDefID,
+	int projectileID,
+	float* newDamage,
+	float* impulseMult)
+{
+	const int featureAllyTeam = feature->allyteam;
+	const size_t count = listFeaturePreDamaged.size();
+
+	for (size_t i = 0; i < count; i++) {
+		CEventClient* ec = listFeaturePreDamaged[i];
+
+		if ((featureAllyTeam < 0) || ec->CanReadAllyTeam(featureAllyTeam)) {
+			if (ec->FeaturePreDamaged(feature, attackerTeamID, damage, weaponDefID, projectileID, newDamage, impulseMult))
+				return true;
+		}
+	}
+	return false;
 }
 
 inline void CEventHandler::FeatureDamaged(
