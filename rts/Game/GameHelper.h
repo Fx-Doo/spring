@@ -109,6 +109,8 @@ struct CExplosionParams {
 	bool damageGround;
 
 	uint32_t projectileID;
+	
+	int teamID
 };
 
 class CGameHelper

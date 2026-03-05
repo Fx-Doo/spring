@@ -1483,7 +1483,8 @@ bool CSyncedLuaHandle::UnitPreDamaged(
 	int projectileID,
 	bool paralyzer,
 	float* newDamage,
-	float* impulseMult
+	float* impulseMult,
+	int attackerTeamID
 ) {
 	RECOIL_DETAILED_TRACY_ZONE;
 	LUA_CALL_IN_CHECK(L, false);
@@ -1513,6 +1514,13 @@ bool CSyncedLuaHandle::UnitPreDamaged(
 			lua_pushnumber(L, attacker->id);
 			lua_pushnumber(L, attacker->unitDef->id);
 			lua_pushnumber(L, attacker->team);
+			inArgCount += 3;
+		}
+		else
+		{
+			lua_pushnil(L);
+			lua_pushnil(L);
+			lua_pushnumber(L, attackerTeamID);
 			inArgCount += 3;
 		}
 	}

@@ -192,7 +192,7 @@ class LuaUtils {
 		// Push helpers dependant on the above
 		static void PushAttackerDef(lua_State* L, const CUnit& attacker);
 		static void PushAttackerDef(lua_State* L, const CUnit* const attacker);
-		static void PushAttackerInfo(lua_State* L, const CUnit* const attacker);
+		static void PushAttackerInfo(lua_State* L, const CUnit* const attacker, int attackerTeamID = -1);
 #endif
 
 		template<typename ...Args>
