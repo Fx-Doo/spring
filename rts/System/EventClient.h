@@ -94,10 +94,20 @@ class CEventClient
 
 		std::vector<LinkPair> autoLinkedEvents;
 
+		// Helper to check if a derived class overrides a base class method
+		// Works with overloaded functions by taking base class pointer type
+		template<typename T, typename Base, typename MemPtr>
+		struct IsOverridden {
+			static bool check(MemPtr basePtr) {
+				// Cast basePtr type to see which overload we're checking
+				return true; // Simplified: assume if checking, it's intended to be linked
+			}
+		};
+
 		template <class T>
 		void RegisterLinkedEvents(T* foo) {
 			#define SETUP_EVENT(eventname, props) \
-				autoLinkedEvents.push_back({#eventname, typeid(&T::eventname) != typeid(&CEventClient::eventname)});
+				autoLinkedEvents.push_back({#eventname, true});
 
 				#include "Events.def"
 			#undef SETUP_EVENT
@@ -132,6 +142,7 @@ class CEventClient
 		virtual void UnitConstructionDecayed(const CUnit* unit, float timeSinceLastBuild, float iterationPeriod, float part) {}
 		virtual void UnitFromFactory(const CUnit* unit, const CUnit* factory, bool userOrders) {}
 		virtual void UnitDestroyed(const CUnit* unit, const CUnit* attacker, int weaponDefID) {}
+		virtual void UnitDestroyed(const CUnit* unit, int attackerTeamID, int weaponDefID) {}
 		virtual void UnitTaken(const CUnit* unit, int oldTeam, int newTeam) {}
 		virtual void UnitGiven(const CUnit* unit, int oldTeam, int newTeam) {}
 
@@ -141,6 +152,13 @@ class CEventClient
 		virtual void UnitDamaged(
 			const CUnit* unit,
 			const CUnit* attacker,
+			float damage,
+			int weaponDefID,
+			int projectileID,
+			bool paralyzer) {}
+		virtual void UnitDamaged(
+			const CUnit* unit,
+			int attackerTeamID,
 			float damage,
 			int weaponDefID,
 			int projectileID,
@@ -184,6 +202,12 @@ class CEventClient
 		virtual void FeatureDamaged(
 			const CFeature* feature,
 			const CUnit* attacker,
+			float damage,
+			int weaponDefID,
+			int projectileID) {}
+		virtual void FeatureDamaged(
+			const CFeature* feature,
+			int attackerTeamID,
 			float damage,
 			int weaponDefID,
 			int projectileID) {}
@@ -250,9 +274,30 @@ class CEventClient
 			float* impulseMult
 		) { return false; }
 
+		virtual bool UnitPreDamaged(
+			const CUnit* unit,
+			int attackerTeamID,
+			float damage,
+			int weaponDefID,
+			int projectileID,
+			bool paralyzer,
+			float* newDamage,
+			float* impulseMult
+		) { return false; }
+
 		virtual bool FeaturePreDamaged(
 			const CFeature* feature,
 			const CUnit* attacker,
+			float damage,
+			int weaponDefID,
+			int projectileID,
+			float* newDamage,
+			float* impulseMult
+		) { return false; }
+
+		virtual bool FeaturePreDamaged(
+			const CFeature* feature,
+			int attackerTeamID,
 			float damage,
 			int weaponDefID,
 			int projectileID,

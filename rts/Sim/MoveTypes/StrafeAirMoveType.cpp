@@ -522,7 +522,7 @@ bool CStrafeAirMoveType::Update()
 			// NOTE: the crashing-state can only be set (and unset) by scripts
 			if (UpdateAirPhysics({crashRudder, crashElevator, crashAileron, 0.0f}, owner->frontdir)
 					|| (CGround::GetHeightAboveWater(owner->pos.x, owner->pos.z) + 5.0f + owner->radius) > owner->pos.y){
-				owner->ForcedKillUnit(nullptr, true, false, -CSolidObject::DAMAGE_AIRCRAFT_CRASHED);
+				owner->ForcedKillUnit((CUnit*)nullptr, true, false, -CSolidObject::DAMAGE_AIRCRAFT_CRASHED);
 			}
 
 			amtEmitCrashTrailFuncs[crashExpGenID != -1u](owner, crashExpGenID);
@@ -620,8 +620,8 @@ bool CStrafeAirMoveType::HandleCollisions(bool checkCollisions) {
 					owner->SetVelocity(owner->speed * 0.99f);
 
 					if (modInfo.allowUnitCollisionDamage) {
-						owner->DoDamage(DamageArray(damage), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
-						unit->DoDamage(DamageArray(damage), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
+						owner->InputDoDamage(DamageArray(damage), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
+						unit->InputDoDamage(DamageArray(damage), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
 					}
 
 					hitBuilding = true;
@@ -636,8 +636,8 @@ bool CStrafeAirMoveType::HandleCollisions(bool checkCollisions) {
 						unit->Move(dif * (dist - totRad) * (part), true);
 
 					if (modInfo.allowUnitCollisionDamage) {
-						owner->DoDamage(DamageArray(damage), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
-						unit->DoDamage(DamageArray(damage), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
+						owner->InputDoDamage(DamageArray(damage), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
+						unit->InputDoDamage(DamageArray(damage), ZeroVector, nullptr, -CSolidObject::DAMAGE_COLLISION_OBJECT, -1);
 					}
 				}
 			}
@@ -650,7 +650,7 @@ bool CStrafeAirMoveType::HandleCollisions(bool checkCollisions) {
 			// if crashing and we hit a building, die right now
 			// rather than waiting until we are close enough to
 			// the ground
-			owner->ForcedKillUnit(nullptr, true, false, -CSolidObject::DAMAGE_AIRCRAFT_CRASHED);
+			owner->ForcedKillUnit((CUnit*)nullptr, true, false, -CSolidObject::DAMAGE_AIRCRAFT_CRASHED);
 			return true;
 		}
 

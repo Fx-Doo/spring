@@ -73,6 +73,7 @@ public:
 	 */
 	bool AddBuildPower(CUnit* builder, float amount);
 	void DoDamage(const DamageArray& damages, const float3& impulse, CUnit* attacker, int weaponDefID, int projectileID);
+	void DoDamage(const DamageArray& damages, const float3& impulse, int attackerTeamID, int weaponDefID, int projectileID);
 	void SetVelocity(const float3& v);
 	void ForcedMove(const float3& newPos);
 	void ForcedSpin(const float3& newDir) override;

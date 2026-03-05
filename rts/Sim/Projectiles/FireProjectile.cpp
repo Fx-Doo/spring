@@ -114,7 +114,7 @@ void CFireProjectile::Update()
 			}
 
 			for (CUnit* u: *qfQuery.units) {
-				u->DoDamage(fireDmg, ZeroVector, nullptr, -CSolidObject::DAMAGE_EXTSOURCE_FIRE, -1);
+				u->InputDoDamage(fireDmg, ZeroVector, nullptr, -CSolidObject::DAMAGE_EXTSOURCE_FIRE, -1);
 			}
 		}
 	}
