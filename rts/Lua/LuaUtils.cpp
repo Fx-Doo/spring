@@ -1965,14 +1965,6 @@ void LuaUtils::PushAttackerInfo(lua_State* L, const CUnit* const attacker)
 	lua_pushnil(L);
 	lua_pushnil(L);
 }
-
-void LuaUtils::PushAttackerTeamInfo(lua_State* L, int attackerTeamID)
-{
-	// Push nil for attackerID and attackerDefID, then the actual team ID
-	lua_pushnil(L);
-	lua_pushnil(L);
-	lua_pushnumber(L, attackerTeamID);
-}
 #endif
 
 

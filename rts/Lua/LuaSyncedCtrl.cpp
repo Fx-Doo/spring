@@ -466,7 +466,6 @@ static bool ParseProjectileParams(lua_State* L, ProjectileParams& params, const 
 	}
 
 	params.teamID = teamHandler.GaiaTeamID();
-	int ownerTeam = -1;  // track explicit ownerTeam for later logic
 
 	for (lua_pushnil(L); lua_next(L, tblIdx) != 0; lua_pop(L, 1)) {
 		if (!lua_israwstring(L, LUA_TABLE_KEY_INDEX))
@@ -495,7 +494,6 @@ static bool ParseProjectileParams(lua_State* L, ProjectileParams& params, const 
 				case hashString("owner" ): { params.ownerID   = lua_toint(L, LUA_TABLE_VALUE_INDEX)                        ; } break;
 				case hashString("weapon"): { params.weaponNum = lua_toint(L, LUA_TABLE_VALUE_INDEX) - LUA_WEAPON_BASE_INDEX; } break;
 				case hashString("team"  ): { params.teamID    = lua_toint(L, LUA_TABLE_VALUE_INDEX)                        ; } break;
-				case hashString("ownerTeam"): { ownerTeam    = lua_toint(L, LUA_TABLE_VALUE_INDEX)                        ; } break;
 
 				case hashString("ttl"): { params.ttl = lua_tofloat(L, LUA_TABLE_VALUE_INDEX); } break;
 
@@ -524,18 +522,6 @@ static bool ParseProjectileParams(lua_State* L, ProjectileParams& params, const 
 
 			continue;
 		}
-	}
-
-	// Apply team ownership logic:
-	// If owner is valid, derive team from owner (will be cached at projectile fire-time)
-	// If owner is invalid but ownerTeam is set, use ownerTeam
-	// If neither, stay with default (Gaia team)
-	if (params.ownerID >= 0) {
-		// Owner is valid; will derive team from owner->team when projectile is fired
-		// (this will be handled in Weapon.cpp GetProjectileParams)
-	} else if (ownerTeam >= 0) {
-		// No unit owner, but explicit team owner
-		params.teamID = ownerTeam;
 	}
 
 	return true;
@@ -4296,7 +4282,7 @@ int LuaSyncedCtrl::BuggerOff(lua_State* L)
 }
 
 
-static std::optional<std::tuple<float, int, CUnit*, int, float3, int> > ParseDamageParams(lua_State* L)
+static std::optional<std::tuple<float, int, CUnit*, int, float3> > ParseDamageParams(lua_State* L)
 {
 	const float damage    = luaL_checkfloat(L, 2);
 	const int paralyze    = luaL_optint(L, 3, 0);
@@ -4305,7 +4291,6 @@ static std::optional<std::tuple<float, int, CUnit*, int, float3, int> > ParseDam
 	const float3 impulse  = float3(std::clamp(luaL_optfloat(L, 6, 0.0f), -MAX_EXPLOSION_IMPULSE, MAX_EXPLOSION_IMPULSE),
 	                               std::clamp(luaL_optfloat(L, 7, 0.0f), -MAX_EXPLOSION_IMPULSE, MAX_EXPLOSION_IMPULSE),
 	                               std::clamp(luaL_optfloat(L, 8, 0.0f), -MAX_EXPLOSION_IMPULSE, MAX_EXPLOSION_IMPULSE));
-	const int attackerTeam = luaL_optint(L, 9, -1);
 
 	CUnit* attacker = nullptr;
 
@@ -4319,7 +4304,7 @@ static std::optional<std::tuple<float, int, CUnit*, int, float3, int> > ParseDam
 	// negated values from 'CSolidObject::DamageType' also allowed
 	if (weaponDefID >= int(weaponDefHandler->NumWeaponDefs()))
 		return std::nullopt;
-	return std::make_tuple(damage, paralyze, attacker, weaponDefID, impulse, attackerTeam);
+	return std::make_tuple(damage, paralyze, attacker, weaponDefID, impulse);
 }
 
 
@@ -4359,21 +4344,13 @@ int LuaSyncedCtrl::AddFeatureDamage(lua_State* L)
 	if (!damageParams)
 		return 0;
 
-	const auto [damage, paralyze, attacker, weaponDefID, impulse, attackerTeam] = *damageParams;
+	const auto [damage, paralyze, attacker, weaponDefID, impulse] = *damageParams;
 	DamageArray damages(damage);
 
 	if (paralyze)
 		damages.paralyzeDamageTime = paralyze;
 
-	// Determine which damage pathway to use
-	if (attacker != nullptr) {
-		feature->DoDamage(damages, impulse, attacker, weaponDefID, -1);
-	} else if (attackerTeam >= 0) {
-		feature->DoDamage(damages, impulse, attackerTeam, weaponDefID, -1);
-	} else {
-		// Gaia damage
-		feature->DoDamage(damages, impulse, -1, weaponDefID, -1);
-	}
+	feature->DoDamage(damages, impulse, attacker, weaponDefID, -1);
 	return 0;
 }
 
@@ -4402,7 +4379,7 @@ int LuaSyncedCtrl::AddUnitDamage(lua_State* L)
 	if (!damageParams)
 		return 0;
 
-	const auto [damage, paralyze, attacker, weaponDefID, impulse, attackerTeam] = *damageParams;
+	const auto [damage, paralyze, attacker, weaponDefID, impulse] = *damageParams;
 
 	DamageArray damages;
 	damages.Set(unit->armorType, damage);
@@ -4410,15 +4387,7 @@ int LuaSyncedCtrl::AddUnitDamage(lua_State* L)
 	if (paralyze)
 		damages.paralyzeDamageTime = paralyze;
 
-	// Determine which damage pathway to use
-	if (attacker != nullptr) {
-		unit->InputDoDamage(damages, impulse, attacker, weaponDefID, -1, -1);
-	} else if (attackerTeam >= 0) {
-		unit->InputDoDamage(damages, impulse, nullptr, weaponDefID, -1, attackerTeam);
-	} else {
-		// Gaia damage
-		unit->InputDoDamage(damages, impulse, nullptr, weaponDefID, -1, -1);
-	}
+	unit->DoDamage(damages, impulse, attacker, weaponDefID, -1);
 	return 0;
 }
 
@@ -7523,10 +7492,6 @@ static int SetExplosionParam(lua_State* L, CExplosionParams& params, DamageArray
 			params.owner = ParseUnit(L, __func__, index + 1);
 		} break;
 
-		case hashString("ownerTeam"): {
-			params.ownerTeamID = lua_toint(L, index + 1);
-		} break;
-
 		case hashString("hitUnit"): {
 			params.hitObject = ParseUnit(L, __func__, index + 1);
 		} break;
@@ -7624,7 +7589,6 @@ int LuaSyncedCtrl::SpawnExplosion(lua_State* L)
 			.damages              = damages,
 			.weaponDef            = nullptr,
 			.owner                = nullptr,
-			.ownerTeamID          = -1,
 			.hitObject            = ExplosionHitObject(),
 			.craterAreaOfEffect   = 0.0f,
 			.damageAreaOfEffect   = 0.0f,
@@ -7642,16 +7606,6 @@ int LuaSyncedCtrl::SpawnExplosion(lua_State* L)
 			SetExplosionParam(L, params, damages, -2);
 		}
 
-		// If owner is invalid but ownerTeam is set, use team-based damage
-		if (params.owner == nullptr && params.ownerTeamID == -1) {
-			// Check if ownerTeam was explicitly set in the table
-			lua_getfield(L, 7, "ownerTeam");
-			if (lua_isnumber(L, -1)) {
-				params.ownerTeamID = lua_toint(L, -1);
-			}
-			lua_pop(L, 1);
-		}
-
 		helper->Explosion(params);
 	} else {
 		DamageArray damages(luaL_optfloat(L, 7, 1.0f));
@@ -7660,17 +7614,6 @@ int LuaSyncedCtrl::SpawnExplosion(lua_State* L)
 		// parse remaining arguments in order of expected usage frequency
 		params.weaponDef  = weaponDefHandler->GetWeaponDefByID(luaL_optint(L, 16, -1));
 		params.owner      = ParseUnit   (L, __func__, 18);
-		
-		// If owner is invalid/nil, check ownerTeam parameter (position 21)
-		int ownerTeam = luaL_optint(L, 21, -1);
-		if (params.owner == nullptr && ownerTeam >= 0) {
-			params.ownerTeamID = ownerTeam;
-		} else if (params.owner != nullptr) {
-			params.ownerTeamID = params.owner->team;
-		} else {
-			params.ownerTeamID = -1;  // gaia
-		}
-		
 		params.hitObject  = ParseUnit   (L, __func__, 19);
 		params.hitObject  = ParseFeature(L, __func__, 20);
 		//params.hitWeapon = nullptr; // not implemented

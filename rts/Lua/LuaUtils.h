@@ -153,12 +153,6 @@ class LuaUtils {
 		static int Log(lua_State* L);
 		static bool PushLogEntries(lua_State* L);
 
-		// Format and log an error message (without needing lua_State)
-		template<typename... Args>
-		static void SolLuaError(const char* format, Args... args) {
-			LOG_L(L_ERROR, fmt::sprintf(format, args...));
-		}
-
 		static bool PushCustomBaseFunctions(lua_State* L);
 
 		static int ParseIntArray(lua_State* L, int tableIndex,
@@ -199,8 +193,15 @@ class LuaUtils {
 		static void PushAttackerDef(lua_State* L, const CUnit& attacker);
 		static void PushAttackerDef(lua_State* L, const CUnit* const attacker);
 		static void PushAttackerInfo(lua_State* L, const CUnit* const attacker);
-		static void PushAttackerTeamInfo(lua_State* L, int attackerTeamID);
 #endif
+
+		template<typename ...Args>
+		static void SolLuaError(const char* format, Args&& ...args)
+		{
+			std::string what = fmt::sprintf(format, std::forward<Args>(args)...);
+			throw std::runtime_error(what.c_str());
+		}
+
 		template<typename TObj>
 		static const TObj* IdToObject(int id, const char* func = nullptr);
 		template<typename TObj>
@@ -500,9 +501,8 @@ const inline CUnit* LuaUtils::SolIdToObject(int id, const char* func)
 {
 	const CUnit* obj = IdToObject<CUnit>(id, func);
 
-	if (obj == nullptr) {
-		// Object not found, returning nullptr
-	}
+	if (obj == nullptr)
+		SolLuaError("[LuaUtils::%s] Non-existing %s (%d) is supplied", func ? func : __func__, "UnitID", id);
 
 	return obj;
 }
@@ -512,9 +512,8 @@ const inline CFeature* LuaUtils::SolIdToObject(int id, const char* func)
 {
 	const CFeature* obj = IdToObject<CFeature>(id, func);
 
-	if (obj == nullptr) {
-		// Object not found, returning nullptr
-	}
+	if (obj == nullptr)
+		SolLuaError("[LuaUtils::%s] Non-existing %s (%d) is supplied", func ? func : __func__, "FeatureID", id);
 
 	return obj;
 }
@@ -524,9 +523,8 @@ const inline CProjectile* LuaUtils::SolIdToObject(int id, const char* func)
 {
 	const CProjectile* obj = IdToObject<CProjectile>(id, func);
 
-	if (obj == nullptr) {
-		// Object not found, returning nullptr
-	}
+	if (obj == nullptr)
+		SolLuaError("[LuaUtils::%s] Non-existing %s (%d) is supplied", func ? func : __func__, "ProjectileID", id);
 
 	return obj;
 }
@@ -536,9 +534,8 @@ const inline UnitDef* LuaUtils::SolIdToObject(int id, const char* func)
 {
 	const UnitDef* obj = IdToObject<UnitDef>(id, func);
 
-	if (obj == nullptr) {
-		// Object not found, returning nullptr
-	}
+	if (obj == nullptr)
+		SolLuaError("[LuaUtils::%s] Non-existing %s (%d) is supplied", func ? func : __func__, "UnitDefID", id);
 
 	return obj;
 }
@@ -548,9 +545,8 @@ const inline FeatureDef* LuaUtils::SolIdToObject(int id, const char* func)
 {
 	const FeatureDef* obj = IdToObject<FeatureDef>(id, func);
 
-	if (obj == nullptr) {
-		// Object not found, returning nullptr
-	}
+	if (obj == nullptr)
+		SolLuaError("[LuaUtils::%s] Non-existing %s (%d) is supplied", func ? func : __func__, "FeatureDefID", id);
 
 	return obj;
 }

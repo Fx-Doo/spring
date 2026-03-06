@@ -1308,10 +1308,6 @@ ProjectileParams CWeapon::GetProjectileParams()
 	params.weaponNum = weaponNum;
 	params.owner = owner;
 	params.weaponDef = weaponDef;
-	
-	// Cache owner's ID and team at fire-time (owner may die before projectile explodes)
-	params.ownerID = (owner != nullptr) ? owner->id : -1u;
-	params.teamID = (owner != nullptr) ? owner->team : -1;
 
 	switch (currentTarget.type) {
 		case Target_None     : {                                          } break;

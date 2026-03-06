@@ -35,7 +35,7 @@ void CRifle::FireImpl(const bool scriptCall)
 	const float impulse = CGameHelper::CalcImpulseScale(*damages, 1.0f);
 
 	if (hitUnit != nullptr)
-		hitUnit->InputDoDamage(*damages, dir * impulse, owner, weaponDef->id, -1);
+		hitUnit->DoDamage(*damages, dir * impulse, owner, weaponDef->id, -1);
 	else if (hitFeature != nullptr)
 		hitFeature->DoDamage(*damages, dir * impulse, owner, weaponDef->id, -1);
 }
