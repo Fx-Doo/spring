@@ -77,7 +77,7 @@ void CGameHelper::Update()
 		if (attackee == nullptr)
 			continue;
 
-		attackee->DoDamage(wd.damage, wd.impulse, attacker, wd.weaponID, wd.projectileID);
+		attackee->InputDoDamage(wd.damage, wd.impulse, attacker, wd.weaponID, wd.projectileID, wd.attackerTeamID);
 	}
 
 	waitingDamages[wdIdx].clear();
@@ -114,7 +114,8 @@ void CGameHelper::DoExplosionDamage(
 	const bool ignoreOwner,
 	const DamageArray& damages,
 	const int weaponDefID,
-	const int projectileID
+	const int projectileID,
+	const int ownerTeamID
 ) {
 	RECOIL_DETAILED_TRACY_ZONE;
 	assert(unit != nullptr);
@@ -164,10 +165,14 @@ void CGameHelper::DoExplosionDamage(
 
 	if (expDist < (expSpeed * DIRECT_EXPLOSION_DAMAGE_SPEED_SCALE)) {
 		// damage directly
-		unit->DoDamage(expDamages, expImpulse, owner, weaponDefID, projectileID);
+		unit->InputDoDamage(expDamages, expImpulse, owner, weaponDefID, projectileID, ownerTeamID);
 	} else {
-		// damage later
-		waitingDamages[(gs->frameNum + int(expDist / expSpeed) - (DIRECT_EXPLOSION_DAMAGE_SPEED_SCALE - 1)) & (waitingDamages.size() - 1)].emplace_back(std::move(expDamages), expImpulse, ((owner != nullptr)? owner->id: -1), unit->id, weaponDefID, projectileID);
+		// damage later (use cached ownerTeamID instead of recomputing from owner pointer)
+		waitingDamages[(gs->frameNum + int(expDist / expSpeed) - (DIRECT_EXPLOSION_DAMAGE_SPEED_SCALE - 1)) & (waitingDamages.size() - 1)]
+			.emplace_back(std::move(expDamages), expImpulse,
+				((owner != nullptr)? owner->id: -1),
+				ownerTeamID,
+				unit->id, weaponDefID, projectileID);
 	}
 }
 
@@ -179,7 +184,8 @@ void CGameHelper::DoExplosionDamage(
 	const float expEdgeEffect,
 	const DamageArray& damages,
 	const int weaponDefID,
-	const int projectileID
+	const int projectileID,
+	const int ownerTeamID
 ) {
 	RECOIL_DETAILED_TRACY_ZONE;
 	assert(feature != nullptr);
@@ -236,13 +242,13 @@ void CGameHelper::DamageObjectsInExplosionRadius(
 	//   not keep track of end-markers --> certain objects
 	//   would not be damaged AT ALL (!)
 	for (unsigned int n = oldNumUnits; n < newNumUnits; n++)
-		DoExplosionDamage(unitCache[n], params.owner, params.pos, expRad, params.explosionSpeed, params.edgeEffectiveness, params.ignoreOwner, params.damages, weaponDefID, params.projectileID);
+		DoExplosionDamage(unitCache[n], params.owner, params.pos, expRad, params.explosionSpeed, params.edgeEffectiveness, params.ignoreOwner, params.damages, weaponDefID, params.projectileID, params.ownerTeamID);
 
 	unitCache.resize(oldNumUnits);
 
 	// damage all features within the explosion radius
 	for (unsigned int n = oldNumFeatures; n < newNumFeatures; n++)
-		DoExplosionDamage(featureCache[n], params.owner, params.pos, expRad, params.edgeEffectiveness, params.damages, weaponDefID, params.projectileID);
+		DoExplosionDamage(featureCache[n], params.owner, params.pos, expRad, params.edgeEffectiveness, params.damages, weaponDefID, params.projectileID, params.ownerTeamID);
 
 	featureCache.resize(oldNumFeatures);
 }
@@ -283,7 +289,8 @@ void CGameHelper::Explosion(const CExplosionParams& params) {
 				params.ignoreOwner,
 				params.damages,
 				weaponDefID,
-				params.projectileID
+				params.projectileID,
+				params.ownerTeamID
 			);
 		}
 
@@ -296,7 +303,8 @@ void CGameHelper::Explosion(const CExplosionParams& params) {
 				params.edgeEffectiveness,
 				params.damages,
 				weaponDefID,
-				params.projectileID
+				params.projectileID,
+				params.ownerTeamID
 			);
 		}
 	} else {

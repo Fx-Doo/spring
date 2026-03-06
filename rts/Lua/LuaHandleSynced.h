@@ -101,9 +101,30 @@ class CSyncedLuaHandle : public CLuaHandle
 			float* impulseMult
 		) override;
 
+		bool UnitPreDamaged(
+			const CUnit* unit,
+			int attackerTeamID,
+			float damage,
+			int weaponDefID,
+			int projectileID,
+			bool paralyzer,
+			float* newDamage,
+			float* impulseMult
+		) override;
+
 		bool FeaturePreDamaged(
 			const CFeature* feature,
 			const CUnit* attacker,
+			float damage,
+			int weaponDefID,
+			int projectileID,
+			float* newDamage,
+			float* impulseMult
+		) override;
+
+		bool FeaturePreDamaged(
+			const CFeature* feature,
+			int attackerTeamID,
 			float damage,
 			int weaponDefID,
 			int projectileID,
