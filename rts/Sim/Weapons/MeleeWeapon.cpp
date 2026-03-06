@@ -16,5 +16,5 @@ void CMeleeWeapon::FireImpl(const bool scriptCall)
 		return;
 
 	// the heavier the unit, the more impulse it does
-	currentTarget.unit->InputDoDamage(*damages, wantedDir * owner->mass * damages->impulseFactor, owner, weaponDef->id, -1);
+	currentTarget.unit->DoDamage(*damages, wantedDir * owner->mass * damages->impulseFactor, owner, weaponDef->id, -1);
 }

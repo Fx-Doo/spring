@@ -26,7 +26,7 @@
 // for usMemBuffer
 #include "Sim/Units/Scripts/LuaUnitScript.h"
 
-class CTeam;
+
 class CPlayer;
 class CCommandAI;
 class CGroup;
@@ -81,21 +81,11 @@ public:
 
 	const SolidObjectDef* GetDef() const { return ((const SolidObjectDef*) unitDef); }
 
-	/*
-	Attempt to create different pathways for the different origins of damages: from live unit, from dead unit, from gaia/environment(unowned damages)
-	*/
-	virtual void DoDamage(const DamageArray& damages, const float3& impulse, CUnit* attacker, int weaponDefID, int projectileID); // defined attacker
-	virtual void InputDoDamage(const DamageArray& damages, const float3& impulse, CUnit* attacker, int weaponDefID, int projectileID, int attackerTeamID = -1);
-	virtual void DoDamage(const DamageArray& damages, const float3& impulse, CTeam* attackerTeam, int weaponDefID, int projectileID);
-	virtual void DoDamage(const DamageArray& damages, const float3& impulse, int weaponDefID, int projectileID);
+	virtual void DoDamage(const DamageArray& damages, const float3& impulse, CUnit* attacker, int weaponDefID, int projectileID);
 	virtual void DoWaterDamage();
 	virtual void FinishedBuilding(bool postInit);
 
-	// primary damage application; attacker pointer may be null for gaia/other
 	void ApplyDamage(CUnit* attacker, const DamageArray& damages, float& baseDamage, float& experienceMod);
-
-	// team-oriented variant for non-unit attackers
-	void ApplyDamage(CTeam* attackerTeam, const DamageArray& damages, float& baseDamage, float& experienceMod);
 	void ApplyImpulse(const float3& impulse);
 
 	bool AttackUnit(CUnit* unit, bool isUserTarget, bool wantManualFire, bool fpsMode = false);
@@ -143,7 +133,6 @@ public:
 
 	void UpdateTransportees();
 	void ReleaseTransportees(CUnit* attacker, bool selfDestruct, bool reclaimed);
-	void ReleaseTransportees(CTeam* attackerTeam, bool selfDestruct, bool reclaimed);
 	void TransporteeKilled(const CObject* o);
 
 	void AddExperience(float exp);
@@ -245,17 +234,8 @@ public:
 
 public:
 	void KilledScriptFinished(int wreckLevel) { deathScriptFinished = true; delayedWreckLevel = wreckLevel; }
-	// existing unit-attacker variants
 	void ForcedKillUnit(CUnit* attacker, bool selfDestruct, bool reclaimed, int weaponDefID = 0);
 	virtual void KillUnit(CUnit* attacker, bool selfDestruct, bool reclaimed, int weaponDefID = 0);
-
-	// team-based overloads (attackerTeam may be nullptr)
-	void ForcedKillUnit(CTeam* attackerTeam, bool selfDestruct, bool reclaimed, int weaponDefID = 0);
-	virtual void KillUnit(CTeam* attackerTeam, bool selfDestruct, bool reclaimed, int weaponDefID = 0);
-
-	// convenience no-attacker overloads
-	void ForcedKillUnit(int weaponDefID);
-	void KillUnit(int weaponDefID);
 	virtual void IncomingMissile(CMissileProjectile* missile);
 	CFeature* CreateWreck(int wreckLevel, int smokeTime);
 

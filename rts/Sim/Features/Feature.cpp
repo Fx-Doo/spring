@@ -432,50 +432,6 @@ void CFeature::DoDamage(
 	}
 }
 
-void CFeature::DoDamage(
-	const DamageArray& damages,
-	const float3& impulse,
-	int attackerTeamID,
-	int weaponDefID,
-	int projectileID
-) {
-	RECOIL_DETAILED_TRACY_ZONE;
-	// do nothing if already marked for deletion this frame, i.e. isDead
-	if (deleteMe)
-		return;
-	// paralyzers do not damage features
-	if (damages.paralyzeDamageTime)
-		return;
-	if (IsInVoid())
-		return;
-
-	// features have no armor-type, so use default damage
-	float baseDamage = damages.GetDefault();
-	float impulseMult = float((def->drawType >= DRAWTYPE_TREE) || (udef != nullptr && !udef->IsImmobileUnit()));
-
-	if (eventHandler.FeaturePreDamaged(this, attackerTeamID, baseDamage, weaponDefID, projectileID, &baseDamage, &impulseMult))
-		return;
-
-	// NOTE:
-	//   for trees, impulse is used to drive their falling animation
-	//   this also calls our SetVelocity, which puts us in the update
-	//   queue
-	ApplyImpulse((impulse * moveCtrl.impulseMask * impulseMult) / mass);
-
-	// clamp in case Lua-modified damage is negative
-	health -= baseDamage;
-	health = std::min(health, def->health);
-
-	eventHandler.FeatureDamaged(this, attackerTeamID, baseDamage, weaponDefID, projectileID);
-
-	if (health <= 0.0f && def->destructable) {
-		CreateWreck(0, 0);
-
-		featureHandler.DeleteFeature(this);
-		blockHeightChanges = false;
-	}
-}
-
 
 CFeature* CFeature::CreateWreck(int wreckLevel, int smokeTime)
 {

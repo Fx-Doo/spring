@@ -201,7 +201,6 @@ void CWeaponProjectile::Explode(
 		.damages              = damageArray,
 		.weaponDef            = weaponDef,
 		.owner                = owner(),
-		.ownerTeamID          = GetTeamID(),
 		.hitObject            = ExplosionHitObject(hitUnit, hitFeature, hitWeapon),
 		.craterAreaOfEffect   = damages->craterAreaOfEffect,
 		.damageAreaOfEffect   = damages->damageAreaOfEffect,

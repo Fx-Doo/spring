@@ -133,7 +133,6 @@ class CLuaHandle : public CEventClient
 		void UnitReverseBuilt(const CUnit* unit) override;
 		void UnitConstructionDecayed(const CUnit* unit, float timeSinceLastBuild, float iterationPeriod, float part) override;
 		void UnitDestroyed(const CUnit* unit, const CUnit* attacker, int weaponDefID) override;
-		void UnitDestroyed(const CUnit* unit, int attackerTeamID, int weaponDefID) override;
 		void UnitTaken(const CUnit* unit, int oldTeam, int newTeam) override;
 		void UnitGiven(const CUnit* unit, int oldTeam, int newTeam) override;
 
@@ -143,14 +142,6 @@ class CLuaHandle : public CEventClient
 		void UnitDamaged(
 			const CUnit* unit,
 			const CUnit* attacker,
-			float damage,
-			int weaponDefID,
-			int projectileID,
-			bool paralyzer
-		) override;
-		void UnitDamaged(
-			const CUnit* unit,
-			int attackerTeamID,
 			float damage,
 			int weaponDefID,
 			int projectileID,
@@ -192,13 +183,6 @@ class CLuaHandle : public CEventClient
 		void FeatureDamaged(
 			const CFeature* feature,
 			const CUnit* attacker,
-			float damage,
-			int weaponDefID,
-			int projectileID
-		) override;
-		void FeatureDamaged(
-			const CFeature* feature,
-			int attackerTeamID,
 			float damage,
 			int weaponDefID,
 			int projectileID
