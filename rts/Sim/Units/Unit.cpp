@@ -464,6 +464,9 @@ void CUnit::FinishedBuilding(bool postInit)
 void CUnit::KillUnit(CUnit* attacker, bool selfDestruct, bool reclaimed, int weaponDefID, int attackerTeamID)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
+	if (attacker != nullptr && attackerTeamID == -1)
+		attackerTeamID = attacker->team;
+
 	if (IsCrashing() && !beingBuilt)
 		return;
 
@@ -473,13 +476,16 @@ void CUnit::KillUnit(CUnit* attacker, bool selfDestruct, bool reclaimed, int wea
 void CUnit::ForcedKillUnit(CUnit* attacker, bool selfDestruct, bool reclaimed, int weaponDefID, int attackerTeamID)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
+	if (attacker != nullptr && attackerTeamID == -1)
+		attackerTeamID = attacker->team;
+
 	if (isDead)
 		return;
 
 	isDead = true;
 
 	// release attached units
-	ReleaseTransportees(attacker, selfDestruct, reclaimed);
+	ReleaseTransportees(attacker, selfDestruct, reclaimed, attackerTeamID);
 
 	// pre-destruction event; unit may be kept around for its death sequence
 	eventHandler.UnitDestroyed(this, attacker, weaponDefID, attackerTeamID);
@@ -758,7 +764,7 @@ void CUnit::UpdateTransportees()
 	}
 }
 
-void CUnit::ReleaseTransportees(CUnit* attacker, bool selfDestruct, bool reclaimed)
+void CUnit::ReleaseTransportees(CUnit* attacker, bool selfDestruct, bool reclaimed, int attackerTeamID)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	for (TransportedUnit& tu: transportedUnits) {
@@ -777,7 +783,7 @@ void CUnit::ReleaseTransportees(CUnit* attacker, bool selfDestruct, bool reclaim
 			if (!selfDestruct)
 				transportee->DoDamage(DamageArray(1e6f), ZeroVector, nullptr, -CSolidObject::DAMAGE_TRANSPORT_KILLED, -1);
 
-			transportee->KillUnit(attacker, selfDestruct, reclaimed, -CSolidObject::DAMAGE_TRANSPORT_KILLED);
+			transportee->KillUnit(attacker, selfDestruct, reclaimed, -CSolidObject::DAMAGE_TRANSPORT_KILLED, attackerTeamID);
 		} else {
 			// NOTE: game's responsibility to deal with edge-cases now
 			transportee->Move(transportee->pos.cClampInBounds(), false);
@@ -1212,16 +1218,14 @@ void CUnit::DoWaterDamage()
 
 
 
-static void AddUnitDamageStats(CUnit* unit, float damage, bool dealt, int teamID = -1)
+static void AddTeamDamageStats(int teamID, float damage, bool dealt)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	
-	const int targetTeamID = (unit != nullptr) ? unit->team : teamID;
-
-	if (targetTeamID < 0)
+	if (teamID < 0)
 		return;
 
-	CTeam* team = teamHandler.Team(targetTeamID);
+	CTeam* team = teamHandler.Team(teamID);
 	TeamStatistics& stats = team->GetCurrentStats();
 
 	if (dealt) {
@@ -1231,15 +1235,16 @@ static void AddUnitDamageStats(CUnit* unit, float damage, bool dealt, int teamID
 	}
 }
 
-void CUnit::ApplyDamage(CUnit* attacker, const DamageArray& damages, float& baseDamage, float& experienceMod, int attackerTeamID)
+void CUnit::ApplyDamage(const DamageArray& damages, float& baseDamage, float& experienceMod, int attackerTeamID)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	if (damages.paralyzeDamageTime == 0) {
 		// real damage
 		if (baseDamage > 0.0f) {
 			// do not log overkill damage, so nukes etc do not inflate values
-			AddUnitDamageStats(attacker, std::clamp(maxHealth - health, 0.0f, baseDamage), true, attackerTeamID);
-			AddUnitDamageStats(this, std::clamp(maxHealth - health, 0.0f, baseDamage), false);
+			const float clampedDamage = std::clamp(maxHealth - health, 0.0f, baseDamage);
+			AddTeamDamageStats(attackerTeamID, clampedDamage, true);
+			AddTeamDamageStats(team, clampedDamage, false);
 
 			health -= baseDamage;
 		} else {
@@ -1294,6 +1299,93 @@ void CUnit::ApplyDamage(CUnit* attacker, const DamageArray& damages, float& base
 	recentDamage += baseDamage;
 }
 
+namespace {
+	// Immutable damage parameters - always valid regardless of source
+	struct DamageParams {
+		const DamageArray& damages;
+		const float3& impulse;
+		int weaponDefID;
+		int projectileID;
+		bool isCollision;
+		bool isParalyzer;
+	};
+
+	// Mutable damage state that gets updated during processing
+	struct DamageState {
+		float baseDamage;
+		float experienceMod;
+		float impulseMult;
+
+		DamageState(float damage)
+			: baseDamage(damage)
+			, experienceMod(globalUnitParams.expMultiplier)
+			, impulseMult(1.0f)
+		{}
+	};
+
+	static void ProcessArmorModifier(CUnit* unit, const DamageParams& params, DamageState& state)
+	{
+		if (params.isCollision || state.baseDamage <= 0.0f)
+			return;
+
+		state.baseDamage *= unit->curArmorMultiple;
+		unit->restTime = 0; // bleeding != resting
+	}
+
+	static void ProcessFlanking(CUnit* unit, CUnit* attacker, const DamageParams& params, DamageState& state)
+	{
+		if (state.baseDamage > 0.0f && !params.isCollision)
+			unit->SetLastAttacker(attacker);
+
+		if (params.isCollision || state.baseDamage <= 0.0f)
+			return;
+
+		state.baseDamage *= unit->GetFlankingDamageBonus((attacker->pos - unit->pos).SafeNormalize());
+	}
+
+	static void ApplyDamageAndImpulse(CUnit* unit, int attackerTeamID, const DamageParams& params, DamageState& state)
+	{
+		unit->script->WorldHitByWeapon(-(params.impulse * state.impulseMult).SafeNormalize2D(), params.weaponDefID, /*inout*/ state.baseDamage);
+		unit->ApplyImpulse((params.impulse * state.impulseMult) / unit->mass);
+		unit->ApplyDamage(params.damages, state.baseDamage, state.experienceMod, attackerTeamID);
+	}
+
+	static void GrantExperience(CUnit* unit, CUnit* attacker, const DamageParams& params, const DamageState& state)
+	{
+		if (params.isCollision || state.baseDamage <= 0.0f)
+			return;
+		if (teamHandler.Ally(unit->allyteam, attacker->allyteam))
+			return;
+
+		const float scaledExpMod = 0.1f * state.experienceMod * (unit->power / attacker->power);
+		const float scaledDamage = std::max(0.0f, (state.baseDamage + std::min(0.0f, unit->health))) / unit->maxHealth;
+
+		attacker->AddExperience(scaledExpMod * scaledDamage);
+	}
+
+	static bool TryKillUnit(CUnit* unit, CUnit* attacker, int attackerTeamID, const DamageParams& params)
+	{
+		if (unit->health > 0.0f)
+			return false;
+
+		unit->KillUnit(attacker, false, false, params.weaponDefID, attackerTeamID);
+		return true;
+	}
+
+	static void AddKillStats(CUnit* unit, int attackerTeamID, const DamageParams& params)
+	{
+		if (unit->beingBuilt || attackerTeamID < 0)
+			return;
+
+		CTeam* attackerTeam = teamHandler.Team(attackerTeamID);
+
+		if (teamHandler.Ally(unit->allyteam, attackerTeam->teamAllyteam))
+			return;
+
+		attackerTeam->GetCurrentStats().unitsKilled += (1 - params.isCollision);
+	}
+}
+
 void CUnit::DoDamage(
 	const DamageArray& damages,
 	const float3& impulse,
@@ -1307,73 +1399,50 @@ void CUnit::DoDamage(
 	if (IsCrashing() || IsInVoid())
 		return;
 
-	if (attacker != nullptr && attackerTeamID == -1) {
+	if (attacker != nullptr && attackerTeamID == -1)
 		attackerTeamID = attacker->team;
-	}
 
-	float baseDamage = damages.Get(armorType);
-	float experienceMod = globalUnitParams.expMultiplier;
-	float impulseMult = 1.0f;
+	const DamageParams params = {
+		damages,
+		impulse,
+		weaponDefID,
+		projectileID,
+		(weaponDefID == -CSolidObject::DAMAGE_COLLISION_OBJECT || weaponDefID == -CSolidObject::DAMAGE_COLLISION_GROUND),
+		(damages.paralyzeDamageTime != 0)
+	};
+	DamageState state(damages.Get(armorType));
 
-	const bool isCollision = (weaponDefID == -CSolidObject::DAMAGE_COLLISION_OBJECT || weaponDefID == -CSolidObject::DAMAGE_COLLISION_GROUND);
-	const bool isParalyzer = (damages.paralyzeDamageTime != 0);
+	ProcessArmorModifier(this, params, state);
 
-	if (!isCollision && baseDamage > 0.0f) {
-		if (attacker != nullptr) {
-			SetLastAttacker(attacker);
-			// FIXME -- not the impulse direction?
-			baseDamage *= GetFlankingDamageBonus((attacker->pos - pos).SafeNormalize());
-		}
+	if (attacker != nullptr)
+		ProcessFlanking(this, attacker, params, state);
 
-		baseDamage *= curArmorMultiple;
-		restTime = 0; // bleeding != resting
-	}
+	// Note: attacker and attackerTeamID explicitly passed (even if nullptr/-1) for C++/Lua boundary.
+	if (eventHandler.UnitPreDamaged(this, attacker, state.baseDamage, params.weaponDefID, params.projectileID, params.isParalyzer, &state.baseDamage, &state.impulseMult, attackerTeamID))
+		return; // Damage was cancelled
 
-	if (eventHandler.UnitPreDamaged(this, attacker, baseDamage, weaponDefID, projectileID, isParalyzer, &baseDamage, &impulseMult, attackerTeamID))
+	ApplyDamageAndImpulse(this, attackerTeamID, params, state);
+
+	// Note: attacker and attackerTeamID explicitly passed (even if nullptr/-1) for C++/Lua boundary.
+	eventHandler.UnitDamaged(this, attacker, state.baseDamage, params.weaponDefID, params.projectileID, params.isParalyzer, attackerTeamID);
+
+	// unit might have been killed via Lua from within UnitDamaged
+	if (isDead)
+		// perhaps we should GrantExperience + AddKillStats
+		// based on what remaining health the unit had before 
+		// it was killed? Or just let Lua handle it?
 		return;
 
-	script->WorldHitByWeapon(-(impulse * impulseMult).SafeNormalize2D(), weaponDefID, /*inout*/ baseDamage);
-	ApplyImpulse((impulse * impulseMult) / mass);
-	ApplyDamage(attacker, damages, baseDamage, experienceMod, attackerTeamID);
+	eoh->UnitDamaged(*this, attacker, state.baseDamage, params.weaponDefID, params.projectileID, params.isParalyzer, attackerTeamID);
 
-	{
-		eventHandler.UnitDamaged(this, attacker, baseDamage, weaponDefID, projectileID, isParalyzer, attackerTeamID);
+	if (attacker != nullptr)
+		GrantExperience(this, attacker, params, state);
 
-		// unit might have been killed via Lua from within UnitDamaged (e.g.
-		// through a recursive DoDamage call from AddUnitDamage or directly
-		// via DestroyUnit); can skip the rest
-		if (isDead)
-			return;
-
-		eoh->UnitDamaged(*this, attacker, baseDamage, weaponDefID, projectileID, isParalyzer, attackerTeamID);
-	}
-
-	if (!isCollision && baseDamage > 0.0f) {
-		if ((attacker != nullptr) && !teamHandler.Ally(allyteam, attacker->allyteam)) {
-			const float scaledExpMod = 0.1f * experienceMod * (power / attacker->power);
-			const float scaledDamage = std::max(0.0f, (baseDamage + std::min(0.0f, health))) / maxHealth;
-			// alternative
-			// scaledDamage = (max(healthPreDamage, 0) - max(health, 0)) / maxHealth
-
-			attacker->AddExperience(scaledExpMod * scaledDamage);
-		}
-	}
-
-	if (health > 0.0f)
+	if (!TryKillUnit(this, attacker, attackerTeamID, params))
 		return;
 
-	KillUnit(attacker, false, false, weaponDefID, attackerTeamID);
-
-	if (!isDead)
-		return;
-	if (beingBuilt)
-		return;
-
-	CTeam* attackerTeam = (attackerTeamID >= 0) ? teamHandler.Team(attackerTeamID) : nullptr;
-
-	if (attackerTeam != nullptr && !teamHandler.Ally(allyteam, attackerTeam->teamAllyteam)) {
-		attackerTeam->GetCurrentStats().unitsKilled += (1 - isCollision);
-	}
+	if (attackerTeamID >= 0)
+		AddKillStats(this, attackerTeamID, params);
 }
 
 
@@ -2094,7 +2163,7 @@ bool CUnit::AddBuildPower(CUnit* builder, float amount)
 		if (killMe || buildProgress <= 0.0f || health <= 0.0f) {
 			health = 0.0f;
 			buildProgress = 0.0f;
-			KillUnit(builder, false, true, -CSolidObject::DAMAGE_RECLAIMED);
+			KillUnit(builder, false, true, -CSolidObject::DAMAGE_RECLAIMED, builder->team);
 			return false;
 		}
 

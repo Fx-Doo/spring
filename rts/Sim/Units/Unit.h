@@ -84,8 +84,6 @@ public:
 	virtual void DoDamage(const DamageArray& damages, const float3& impulse, CUnit* attacker, int weaponDefID, int projectileID, int attackerTeamID = -1);
 	virtual void DoWaterDamage();
 	virtual void FinishedBuilding(bool postInit);
-
-	void ApplyDamage(CUnit* attacker, const DamageArray& damages, float& baseDamage, float& experienceMod, int attackerTeamID = -1);
 	void ApplyImpulse(const float3& impulse);
 
 	bool AttackUnit(CUnit* unit, bool isUserTarget, bool wantManualFire, bool fpsMode = false);
@@ -132,7 +130,7 @@ public:
 	void UpdateWind(float x, float z, float strength);
 
 	void UpdateTransportees();
-	void ReleaseTransportees(CUnit* attacker, bool selfDestruct, bool reclaimed);
+	void ReleaseTransportees(CUnit* attacker, bool selfDestruct, bool reclaimed, int attackerTeamID);
 	void TransporteeKilled(const CObject* o);
 
 	void AddExperience(float exp);
@@ -248,6 +246,8 @@ public:
 protected:
 	void ChangeTeamReset();
 	void UpdateResources();
+	// Internal-only damage mutator. External callers should always use DoDamage.
+	void ApplyDamage(const DamageArray& damages, float& baseDamage, float& experienceMod, int attackerTeamID = -1);
 	float GetFlankingDamageBonus(const float3& attackDir);
 
 public: // unsynced methods

@@ -131,7 +131,7 @@ class CEventClient
 		virtual void UnitReverseBuilt(const CUnit* unit) {}
 		virtual void UnitConstructionDecayed(const CUnit* unit, float timeSinceLastBuild, float iterationPeriod, float part) {}
 		virtual void UnitFromFactory(const CUnit* unit, const CUnit* factory, bool userOrders) {}
-		virtual void UnitDestroyed(const CUnit* unit, const CUnit* attacker, int weaponDefID, int attackerTeamID = -1) {}
+		virtual void UnitDestroyed(const CUnit* unit, const CUnit* attacker, int weaponDefID, int attackerTeamID) {}
 		virtual void UnitTaken(const CUnit* unit, int oldTeam, int newTeam) {}
 		virtual void UnitGiven(const CUnit* unit, int oldTeam, int newTeam) {}
 
@@ -145,7 +145,7 @@ class CEventClient
 			int weaponDefID,
 			int projectileID,
 		bool paralyzer,
-		int attackerTeamID = -1) {}
+		int attackerTeamID) {}
 		virtual void UnitStunned(const CUnit* unit, bool stunned) {}
 		virtual void UnitExperience(const CUnit* unit, float oldExperience) {}
 		virtual void UnitHarvestStorageFull(const CUnit* unit) {}
@@ -188,7 +188,7 @@ class CEventClient
 			float damage,
 			int weaponDefID,
 			int projectileID,
-			int attackerTeamID = -1) {}
+			int attackerTeamID) {}
 		virtual void FeatureMoved(const CFeature* feature, const float3& oldpos) {}
 
 		virtual void RenderFeaturePreCreated(const CFeature* feature) {}
@@ -250,7 +250,7 @@ class CEventClient
 			bool paralyzer,
 			float* newDamage,
 			float* impulseMult,
-			int attackerTeamID = -1
+			int attackerTeamID
 		) { return false; }
 
 		virtual bool FeaturePreDamaged(
@@ -261,7 +261,7 @@ class CEventClient
 			int projectileID,
 			float* newDamage,
 			float* impulseMult,
-			int attackerTeamID = -1
+			int attackerTeamID
 		) { return false; }
 
 		virtual bool ShieldPreDamaged(

@@ -69,7 +69,7 @@ class CEventHandler
 		void UnitReverseBuilt(const CUnit* unit);
 		void UnitConstructionDecayed(const CUnit* unit, float timeSinceLastBuild, float iterationPeriod, float part);
 		void UnitFromFactory(const CUnit* unit, const CUnit* factory, bool userOrders);
-		void UnitDestroyed(const CUnit* unit, const CUnit* attacker, int weaponDefID, int attackerTeamID = -1);
+		void UnitDestroyed(const CUnit* unit, const CUnit* attacker, int weaponDefID, int attackerTeamID);
 		void UnitTaken(const CUnit* unit, int oldTeam, int newTeam);
 		void UnitGiven(const CUnit* unit, int oldTeam, int newTeam);
 
@@ -94,7 +94,7 @@ class CEventHandler
 			int weaponDefID,
 			int projectileID,
 			bool paralyzer,
-			int attackerTeamID = -1);
+			int attackerTeamID);
 		void UnitStunned(const CUnit* unit, bool stunned);
 		void UnitExperience(const CUnit* unit, float oldExperience);
 		void UnitHarvestStorageFull(const CUnit* unit);
@@ -133,7 +133,7 @@ class CEventHandler
 			float damage,
 			int weaponDefID,
 			int projectileID,
-			int attackerTeamID = -1);
+			int attackerTeamID);
 		void FeatureMoved(const CFeature* feature, const float3& oldpos);
 
 		void ProjectileCreated(const CProjectile* proj, int allyTeam);
@@ -187,7 +187,7 @@ class CEventHandler
 			bool paralyzer,
 			float* newDamage,
 			float* impulseMult,
-			int attackerTeamID = -1
+			int attackerTeamID
 		);
 
 		bool FeaturePreDamaged(
@@ -198,7 +198,7 @@ class CEventHandler
 			int projectileID,
 			float* newDamage,
 			float* impulseMult,
-			int attackerTeamID = -1
+			int attackerTeamID
 		);
 
 		bool ShieldPreDamaged(
