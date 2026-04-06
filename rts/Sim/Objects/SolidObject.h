@@ -139,7 +139,7 @@ public:
 
 	virtual const YardMapStatus* GetBlockMap() const { return nullptr; }
 
-	virtual void ForcedMove(const float3& newPos) {}
+	virtual void ForcedMove(const float3& newPos) = 0;
 	virtual void ForcedSpin(const float3& newDir);
 	virtual void ForcedSpin(const float3& newFrontDir, const float3& newRightDir);
 
@@ -160,7 +160,7 @@ public:
 	}
 
 
-	void SetDirVectorsEuler(const float3 angles);
+	void SetDirVectorsEuler(const float3& angles);
 	void SetDirVectors(const CMatrix44f& matrix) {
 		rightdir.x = -matrix[0]; updir.x = matrix[4]; frontdir.x = matrix[ 8];
 		rightdir.y = -matrix[1]; updir.y = matrix[5]; frontdir.y = matrix[ 9];
@@ -246,7 +246,7 @@ public:
 
 	float2 GetFootPrint(float scale) const { return {xsize * scale, zsize * scale}; }
 
-	float3 GetDragAccelerationVec(float atmosphericDensity, float waterDensity, float dragCoeff, float frictionCoeff, float myGravity) const;
+	float3 GetDragAccelerationVec(float atmosphericDensity, float waterDensity, float dragCoeff, float frictionCoeff) const;
 	float3 GetWantedUpDir(bool useGroundNormal, bool useObjectNormal, float dirSmoothing) const;
 
 	float GetDrawRadius() const override;

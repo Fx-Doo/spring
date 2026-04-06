@@ -1379,9 +1379,9 @@ end
 --  Unit call-ins
 --
 
-function gadgetHandler:UnitCreated(unitID, unitDefID, unitTeam, builderID, builderDefID, builderTeam)
+function gadgetHandler:UnitCreated(unitID, unitDefID, unitTeam, builderID)
   for _,g in r_ipairs(self.UnitCreatedList) do
-    g:UnitCreated(unitID, unitDefID, unitTeam, builderID, builderDefID, builderTeam)
+    g:UnitCreated(unitID, unitDefID, unitTeam, builderID)
   end
 end
 
@@ -1859,6 +1859,24 @@ end
 function gadgetHandler:CameraPositionChanged(posx, posy, posz)
   for _,g in r_ipairs(self.CameraPositionChangedList) do
     g:CameraPositionChanged(posx, posy, posz)
+  end
+end
+
+function gadgetHandler:MiniMapRotationChanged(newRot, oldRot)
+  for _,g in r_ipairs(self.MiniMapRotationChangedList) do
+    g:MiniMapRotationChanged(newRot, oldRot)
+  end
+end
+
+function gadgetHandler:MiniMapStateChanged(isMinimized, isMaximized, isSlaved)
+  for _,g in r_ipairs(self.MiniMapStateChangedList) do
+    g:MiniMapStateChanged(isMinimized, isMaximized, isSlaved)
+  end
+end
+
+function gadgetHandler:MiniMapGeometryChanged(newPosX, newPosY, newDimX, newDimY, oldPosX, oldPosY, oldDimX, oldDimY)
+  for _,g in r_ipairs(self.MiniMapGeometryChangedList) do
+    g:MiniMapGeometryChanged(newPosX, newPosY, newDimX, newDimY, oldPosX, oldPosY, oldDimX, oldDimY)
   end
 end
 

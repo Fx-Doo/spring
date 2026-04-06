@@ -2,6 +2,7 @@
 
 #include <tuple>
 #include <concepts>
+#include "SpringHash.h"
 
 namespace spring {
     namespace
@@ -14,9 +15,9 @@ namespace spring {
         //     http://stackoverflow.com/questions/4948780
 
         template <typename T, std::unsigned_integral S>
-        inline void hash_combine(S& seed, T const& v)
+        inline void hash_combine(S& seed, const T& v)
         {
-            seed ^= std::hash<T>()(v) + 0x9e3779b9 + (seed<<6) + (seed>>2);
+            seed ^= spring::LiteHash(v) + S(0x9e3779b9) + (seed<<6) + (seed>>2);
         }
 
         // Recursive template code derived from Matthieu M.
@@ -24,7 +25,7 @@ namespace spring {
         struct HashValueImpl
         {
             template <std::unsigned_integral S>
-            static void apply(S& seed, Tuple const& tuple)
+            static void apply(S& seed, const Tuple& tuple)
             {
                 HashValueImpl<Tuple, Index-1>::apply(seed, tuple);
                 hash_combine(seed, std::get<Index>(tuple));
@@ -35,7 +36,7 @@ namespace spring {
         struct HashValueImpl<Tuple,0>
         {
             template <std::unsigned_integral S>
-            static void apply(S& seed, Tuple const& tuple)
+            static void apply(S& seed, const Tuple& tuple)
             {
                 hash_combine(seed, std::get<0>(tuple));
             }
@@ -43,19 +44,20 @@ namespace spring {
     }
 
     template <typename T, std::unsigned_integral S>
-    inline S hash_combine(T const& v, S seed = 1337u)
+    inline S hash_combine(const T& v, S seed = S(1337))
     {
-        seed ^= std::hash<T>()(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        seed ^= spring::LiteHash(v) + S(0x9e3779b9) + (seed << 6) + (seed >> 2);
         return seed;
     }
     template <typename T, std::unsigned_integral S>
-    inline S hash_combine(S hashValue, S seed = 1337u)
+    inline S hash_combine(S hashValue, S seed = S(1337))
     {
-        seed ^= hashValue + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        seed ^= hashValue + S(0x9e3779b9) + (seed << 6) + (seed >> 2);
         return seed;
     }
 }
 
+// for std::tuple as a key in std::unordered_map / std::unordered_set
 template <typename ... TT>
 struct std::hash<std::tuple<TT...>>
 {

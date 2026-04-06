@@ -158,6 +158,11 @@ std::string FileSystem::GetParent(const std::string& pathStr)
 int32_t FileSystem::GetFileSize(const std::string& fileStr)
 {
 	const auto file = Recoil::filesystem::u8path(fileStr);
+	if (DirExists(file)) {
+		LOG_L(L_WARNING, "[FSA::%s] error '%s' reading file size '%s'", __func__, "the file is directory", fileStr.c_str());
+		return -1;
+	}
+
 	std::error_code ec;
 	auto size = static_cast<int32_t>(fs::file_size(file, ec));
 	if (ec) {
@@ -902,7 +907,7 @@ std::string FileSystem::GetExtension(const std::string& pathStr)
 }
 
 std::string FileSystem::GetNormalizedPath(const std::string& path) {
-	return Impl::StoreUTF8AsString(std::filesystem::path(path).lexically_normal().generic_u8string());
+	return Impl::StoreUTF8AsString(std::filesystem::path(ForwardSlashes(path)).lexically_normal().generic_u8string());
 }
 
 bool FileSystem::CheckFile(const std::string& file)

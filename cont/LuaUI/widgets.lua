@@ -187,6 +187,9 @@ local callInLists = {
   'ActiveCommandChanged',
   'CameraRotationChanged',
   'CameraPositionChanged',
+  'MiniMapRotationChanged',
+  'MiniMapStateChanged',
+  'MiniMapGeometryChanged',
   'CommandNotify',
   'AddConsoleLine',
   'ViewResize',
@@ -1093,12 +1096,13 @@ function widgetHandler:Shutdown()
   return
 end
 
-function widgetHandler:Update()
-  local deltaTime = Spring.GetLastUpdateSeconds()
+function widgetHandler:Update(dt)
+  dt = dt or Spring.GetLastUpdateSeconds()
+
   -- update the hour timer
-  hourTimer = (hourTimer + deltaTime) % 3600.0
+  hourTimer = (hourTimer + dt) % 3600.0
   for _,w in ipairs(self.UpdateList) do
-    w:Update(deltaTime)
+    w:Update(dt)
   end
   return
 end
@@ -1160,6 +1164,24 @@ end
 function widgetHandler:CameraPositionChanged(posx, posy, posz)
   for _,w in ipairs(self.CameraPositionChangedList) do
     w:CameraPositionChanged(posx, posy, posz)
+  end
+end
+
+function widgetHandler:MiniMapRotationChanged(newRot, oldRot)
+  for _,w in ipairs(self.MiniMapRotationChangedList) do
+    w:MiniMapRotationChanged(newRot, oldRot)
+  end
+end
+
+function widgetHandler:MiniMapStateChanged(isMinimized, isMaximized, isSlaved)
+  for _,w in ipairs(self.MiniMapStateChangedList) do
+    w:MiniMapStateChanged(isMinimized, isMaximized, isSlaved)
+  end
+end
+
+function widgetHandler:MiniMapGeometryChanged(newPosX, newPosY, newDimX, newDimY, oldPosX, oldPosY, oldDimX, oldDimY)
+  for _,w in ipairs(self.MiniMapGeometryChangedList) do
+    w:MiniMapGeometryChanged(newPosX, newPosY, newDimX, newDimY, oldPosX, oldPosY, oldDimX, oldDimY)
   end
 end
 
@@ -1802,9 +1824,9 @@ end
 --  Unit call-ins
 --
 
-function widgetHandler:UnitCreated(unitID, unitDefID, unitTeam, builderID, builderDefID, builderTeam)
+function widgetHandler:UnitCreated(unitID, unitDefID, unitTeam, builderID)
   for _,w in ipairs(self.UnitCreatedList) do
-    w:UnitCreated(unitID, unitDefID, unitTeam, builderID, builderDefID, builderTeam)
+    w:UnitCreated(unitID, unitDefID, unitTeam, builderID)
   end
   return
 end

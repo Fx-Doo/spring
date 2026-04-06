@@ -8,6 +8,8 @@
 #include <cctype>
 #include <cmath>
 
+#include <fmt/format.h>
+
 #include "Rendering/GL/myGL.h"
 #include "Rendering/GL/RenderBuffers.h"
 #include "System/Log/ILog.h"
@@ -44,12 +46,18 @@ void CIconHandler::Kill()
 }
 
 
-void CIconHandler::DumpAtlasTextures() const
+void CIconHandler::DumpAtlasTextures(const std::string& fileExt) const
 {
-	if (atlasTextureIDs[0])
-		glSaveTexture(atlasTextureIDs[0], "IconsAtlas1.png");
-	if (atlasTextureIDs[1])
-		glSaveTexture(atlasTextureIDs[1], "IconsAtlas2.png");
+	if (atlasTextureIDs[0]) {
+		for (int level = 0; level < DEFAULT_NUM_OF_TEXTURE_LEVELS; ++level) {
+			glSaveTexture(atlasTextureIDs[0], fmt::format("IconsAtlas1-{}.{}", level, fileExt).c_str(), level);
+		}
+	}
+	if (atlasTextureIDs[1]) {
+		for (int level = 0; level < DEFAULT_NUM_OF_TEXTURE_LEVELS; ++level) {
+			glSaveTexture(atlasTextureIDs[1], fmt::format("IconsAtlas2-{}.{}", level, fileExt).c_str(), level);
+		}
+	}
 }
 
 bool CIconHandler::UpdateAtlasData(size_t atlasIdx)
@@ -58,11 +66,20 @@ bool CIconHandler::UpdateAtlasData(size_t atlasIdx)
 	if (atlas)
 		return true;
 
-	atlas = std::make_unique<CTextureRenderAtlas>(CTextureAtlas::ATLAS_ALLOC_LEGACY, 0, 0, GL_RGBA8, IntToString(atlasIdx, "IconsAtlas_%i"));
+	atlas = std::make_unique<CTextureRenderAtlas>(CTextureAtlas::ATLAS_ALLOC_LEGACY, 0, 0, DEFAULT_NUM_OF_TEXTURE_LEVELS, GL_RGBA8, IntToString(atlasIdx, "IconsAtlas_%i"));
 
 	spring::unordered_set<std::string> invalidIcons;
-	for (const auto& [iconName, iconIndex] : iconsMap) {
 
+	// Sort icon names to ensure deterministic ordering across runs
+	std::vector<std::string> sortedIconNames;
+	sortedIconNames.reserve(iconsMap.size());
+	for (const auto& [iconName, _] : iconsMap) {
+		sortedIconNames.push_back(iconName);
+	}
+	std::sort(sortedIconNames.begin(), sortedIconNames.end());
+
+	for (const auto& iconName : sortedIconNames) {
+		const auto iconIndex = iconsMap[iconName];
 		const auto& iconData = iconsData[iconIndex];
 
 		if (iconData.GetAtlasIndex() != atlasIdx)
@@ -127,10 +144,14 @@ bool CIconHandler::CreateAtlasTexture(size_t atlasIdx)
 		atlasTextureIDs[atlasIdx] = bm.CreateMipMapTexture();
 		atlasTextureSizes[atlasIdx] = int2(bm.xsize, bm.ysize);
 
+		// CBitmap::CreateTexture defaults to GL_REPEAT, which is not what we want for atlas
+		glBindTexture(GL_TEXTURE_2D, atlasTextureIDs[atlasIdx]);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
 		return true;
 	}
 
-	atlas->SetMaxTexLevel(DEFAULT_NUM_OF_TEXTURE_LEVELS);
 	if (!atlas->CreateAtlasTexture())
 		return false;
 

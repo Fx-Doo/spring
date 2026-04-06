@@ -59,3 +59,7 @@ If you want to compile the engine without Docker to use a different compiler, to
 ## License
 
 Our Terms are documented in the [LICENSE](LICENSE).
+
+## AI Policy usage
+
+Please adhere to the [AI usage policy](https://github.com/beyond-all-reason/RecoilEngine/blob/master/AI_POLICY.md), if you use such tools.

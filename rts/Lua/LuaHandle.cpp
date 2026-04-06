@@ -1063,14 +1063,12 @@ inline void CLuaHandle::UnitCallIn(const LuaHashString& hs, const CUnit* unit)
  * @param unitDefID integer
  * @param unitTeam integer
  * @param builderID integer?
- * @param builderDefID integer?
- * @param builderTeam integer?
  */
 void CLuaHandle::UnitCreated(const CUnit* unit, const CUnit* builder)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	LUA_CALL_IN_CHECK(L);
-	luaL_checkstack(L, 9, __func__);
+	luaL_checkstack(L, 7, __func__);
 
 	const LuaUtils::ScopedDebugTraceBack traceBack(L);
 
@@ -1081,14 +1079,11 @@ void CLuaHandle::UnitCreated(const CUnit* unit, const CUnit* builder)
 	lua_pushnumber(L, unit->id);
 	lua_pushnumber(L, unit->unitDef->id);
 	lua_pushnumber(L, unit->team);
-	if (builder != nullptr) {
+	if (builder != nullptr)
 		lua_pushnumber(L, builder->id);
-		lua_pushnumber(L, builder->unitDef->id);
-		lua_pushnumber(L, builder->team);
-	}
 
 	// call the routine
-	RunCallInTraceback(L, cmdStr, (builder != nullptr)? 6: 3, 0, traceBack.GetErrFuncIdx(), false);
+	RunCallInTraceback(L, cmdStr, (builder != nullptr)? 4: 3, 0, traceBack.GetErrFuncIdx(), false);
 }
 
 
@@ -2541,8 +2536,10 @@ void CLuaHandle::Update()
 	if (!cmdStr.GetGlobalFunc(L))
 		return;
 
-	// call the routine
-	RunCallIn(L, cmdStr, 0, 0);
+	if (game) // null in LuaMenu
+		lua_pushnumber(L, game->updateDeltaSeconds);
+
+	RunCallIn(L, cmdStr, game ? 1 : 0, 0);
 }
 
 
@@ -3553,6 +3550,89 @@ void CLuaHandle::CameraPositionChanged(const float3& pos)
 	lua_pushnumber(L, pos.z);
 
 	RunCallIn(L, cmdStr, 3, 0);
+}
+
+/*** Called when the MiniMap rotation changes
+ * 
+ * @function Callins:MiniMapRotationChanged
+ * @param newRot number MiniMap rotation in radians
+ * @param oldRot number MiniMap old rotation in radians
+ */
+void CLuaHandle::MiniMapRotationChanged(const float newRot, const float oldRot)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	LUA_CALL_IN_CHECK(L, false);
+	luaL_checkstack(L, 5, __func__);
+
+	static const LuaHashString cmdStr(__func__);
+	if (!cmdStr.GetGlobalFunc(L))
+		return;
+
+	lua_pushnumber(L, newRot);
+	lua_pushnumber(L, oldRot);
+
+	RunCallIn(L, cmdStr, 2, 0);
+}
+
+/*** Called when the MiniMap minimizes or maximizes changes
+ * 
+ * @function Callins:MiniMapStateChanged
+ * @param isMinimized boolean
+ * @param isMaximized boolean
+ */
+void CLuaHandle::MiniMapStateChanged(const bool isMinimized,
+									const bool isMaximized,
+									const bool isSlaved)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	LUA_CALL_IN_CHECK(L, false);
+	luaL_checkstack(L, 5, __func__);
+
+	static const LuaHashString cmdStr(__func__);
+	if (!cmdStr.GetGlobalFunc(L))
+		return;
+
+	lua_pushboolean(L, isMinimized);
+	lua_pushboolean(L, isMaximized);
+	lua_pushboolean(L, isSlaved);
+
+
+	RunCallIn(L, cmdStr, 3, 0);
+}
+
+/*** Called when the MiniMap Geometry changes
+ * 
+ * @function Callins:MiniMapGeometryChanged
+ * @param newPosX number in pixels
+ * @param newPosY number in pixels
+ * @param newDimX number in pixels
+ * @param newDimY number in pixels
+ * @param oldPosX number in pixels
+ * @param oldPosY number in pixels
+ * @param oldDimX number in pixels
+ * @param oldDimY number in pixels
+ */
+void CLuaHandle::MiniMapGeometryChanged(const int2 newPos, const int2 newDim, const int2 oldPos, const int2 oldDim)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	LUA_CALL_IN_CHECK(L, false);
+	luaL_checkstack(L, 11, __func__); // 3 + 8 args
+
+	static const LuaHashString cmdStr(__func__);
+	if (!cmdStr.GetGlobalFunc(L))
+		return;
+
+	lua_pushnumber(L, newPos.x);
+	lua_pushnumber(L, newPos.y);
+	lua_pushnumber(L, newDim.x);
+	lua_pushnumber(L, newDim.y);
+	
+	lua_pushnumber(L, oldPos.x);
+	lua_pushnumber(L, oldPos.y);
+	lua_pushnumber(L, oldDim.x);
+	lua_pushnumber(L, oldDim.y);
+
+	RunCallIn(L, cmdStr, 8, 0);
 }
 
 /*** Called when a command is issued.

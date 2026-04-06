@@ -107,7 +107,7 @@ public:
 	virtual void Activate();
 	virtual void Deactivate();
 
-	void ForcedMove(const float3& newPos);
+	void ForcedMove(const float3& newPos) override;
 
 	void DeleteScript();
 	void EnableScriptMoveType();
@@ -545,6 +545,7 @@ public:
 
 	mutable std::string definedIconName;
 	mutable size_t currentIconIndex = size_t(-1); // icon::INVALID_ICON_INDEX;
+	mutable size_t customIconIndex = size_t(-1); // icon::INVALID_ICON_INDEX;
 
 	bool drawIcon = true;
 private:
