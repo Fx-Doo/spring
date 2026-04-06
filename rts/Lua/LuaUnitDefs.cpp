@@ -278,8 +278,8 @@ static int SafeIconType(lua_State* L, const void* data)
 {
 	// the iconType is unsynced because LuaUI has SetUnitDefIcon()
 	if (!CLuaHandle::GetHandleSynced(L)) {
-		const icon::CIcon& iconType = *((const icon::CIcon*)data);
-		lua_pushsstring(L, iconType->GetName());
+		const auto& iconName = *((const std::string*)data);
+		lua_pushsstring(L, iconName);
 		return 1;
 	}
 	return 0;
@@ -599,7 +599,7 @@ ADD_BOOL("canAttackWater",  canAttackWater); // CUSTOM
 	ADD_FUNCTION("moveDef",            ud.pathType,           MoveDefTable);
 	ADD_FUNCTION("shieldWeaponDef",    ud.shieldWeaponDef,    WeaponDefToID);
 	ADD_FUNCTION("stockpileWeaponDef", ud.stockpileWeaponDef, WeaponDefToID);
-	ADD_FUNCTION("iconType",           ud.iconType,           SafeIconType);
+	ADD_FUNCTION("iconType",           ud.iconName,           SafeIconType);
 	ADD_FUNCTION("collisionVolume",    ud.collisionVolume,    ColVolTable);
 	ADD_FUNCTION("selectionVolume",    ud.selectionVolume,    ColVolTable);
 
@@ -693,15 +693,15 @@ ADD_BOOL("canAttackWater",  canAttackWater); // CUSTOM
 	ADD_FLOAT("energyUpkeep",   ud.upkeep.energy);
 	ADD_FLOAT("metalMake",      ud.resourceMake.metal);
 	ADD_FLOAT("energyMake",     ud.resourceMake.energy);
-	ADD_FLOAT("makesMetal",     ud.makesMetal);
+	ADD_FLOAT("makesMetal",     ud.makesResources.metal);
 	ADD_FLOAT("metalCost",      ud.cost.metal);
 	ADD_FLOAT("energyCost",     ud.cost.energy);
 	ADD_FLOAT("buildTime",      ud.buildTime);
 	ADD_FLOAT("buildeeBuildRadius", ud.buildeeBuildRadius);
 	ADD_FLOAT("extractsMetal",  ud.extractsMetal);
 	ADD_FLOAT("extractRange",   ud.extractRange);
-	ADD_FLOAT("windGenerator",  ud.windGenerator);
-	ADD_FLOAT("tidalGenerator", ud.tidalGenerator);
+	ADD_FLOAT("windGenerator",  ud.windGenerator.energy);
+	ADD_FLOAT("tidalGenerator", ud.tidalGenerator.energy);
 	ADD_FLOAT("metalStorage",   ud.storage.metal);
 	ADD_FLOAT("energyStorage",  ud.storage.energy);
 
@@ -727,6 +727,7 @@ ADD_BOOL("canAttackWater",  canAttackWater); // CUSTOM
 	ADD_FLOAT("seismicSignature", ud.seismicSignature);
 	ADD_BOOL("stealth",      ud.stealth);
 	ADD_BOOL("sonarStealth", ud.sonarStealth);
+	ADD_BOOL("leavesGhost", ud.leavesGhost);
 
 	ADD_FLOAT("mass", ud.mass);
 
@@ -900,7 +901,7 @@ ADD_BOOL("canAttackWater",  canAttackWater); // CUSTOM
 	ADD_FLOAT("nanoColorB",   ud.nanoColor.z);
 
 	ADD_STRING("scriptName", ud.scriptName);
-	ADD_STRING("scriptPath", ud.scriptName); //FIXME // backward compability
+	ADD_STRING("scriptPath", ud.scriptName); //FIXME // backward compatibility
 
 	return true;
 }

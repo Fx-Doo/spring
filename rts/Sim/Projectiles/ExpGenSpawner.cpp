@@ -49,7 +49,16 @@ void CExpGenSpawner::Update()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	if ((deleteMe |= ((delay--) <= 0)))
-		explosionGenerator->Explosion(pos, dir,  damage, 0.0f, 0.0f,  owner(), nullptr, true);
+		explosionGenerator->Explosion(
+			pos,
+			dir,
+			damage,
+			0.0f,
+			0.0f,
+			owner(),
+			ExplosionHitObject(),
+			true
+		);
 }
 
 
@@ -59,10 +68,10 @@ bool CExpGenSpawner::GetMemberInfo(SExpGenSpawnableMemberInfo& memberInfo)
 	if (CProjectile::GetMemberInfo(memberInfo))
 		return true;
 
-	CHECK_MEMBER_INFO_INT  (CExpGenSpawner, delay )
-	CHECK_MEMBER_INFO_FLOAT(CExpGenSpawner, damage)
+	CHECK_MEMBER_INFO_INT  (CExpGenSpawner, delay );
+	CHECK_MEMBER_INFO_FLOAT(CExpGenSpawner, damage);
 	// TODO: much nicer to load cegID directly via LoadGeneratorID callback
-	CHECK_MEMBER_INFO_PTR  (CExpGenSpawner, explosionGenerator, explGenHandler.LoadGenerator)
+	CHECK_MEMBER_INFO_PTR  (CExpGenSpawner, explosionGenerator, explGenHandler.LoadGenerator);
 
 	return false;
 }

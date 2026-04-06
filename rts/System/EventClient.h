@@ -20,6 +20,7 @@
 using std::string;
 using std::vector;
 
+struct CExplosionParams;
 class CSolidObject;
 class CUnit;
 class CWeapon;
@@ -33,6 +34,7 @@ struct UnitDef;
 struct BuildInfo;
 struct FeatureDef;
 class LuaMaterial;
+struct WeaponDef;
 
 #ifndef zipFile
 	// might be defined through zip.h already
@@ -200,7 +202,7 @@ class CEventClient
 		virtual void StockpileChanged(const CUnit* unit,
 		                              const CWeapon* weapon, int oldCount) {}
 
-		virtual bool Explosion(int weaponID, int projectileID, const float3& pos, const CUnit* owner) { return false; }
+		virtual bool Explosion(int weaponID, const WeaponDef* weaponDef, const CExplosionParams& params) { return false; }
 
 
 		virtual bool CommandFallback(const CUnit* unit, const Command& cmd) { return false; }
@@ -303,6 +305,11 @@ class CEventClient
 		virtual bool DefaultCommand(const CUnit* unit, const CFeature* feature, int& cmd);
 
 		virtual void ActiveCommandChanged(const SCommandDescription* cmdDesc);
+		virtual void CameraRotationChanged(const float3& rot);
+		virtual void CameraPositionChanged(const float3& pos);
+		virtual void MiniMapRotationChanged(const float newRot, const float oldRot);
+		virtual void MiniMapStateChanged(const bool isMinimized, const bool isMaximized, const bool isSlaved);
+		virtual void MiniMapGeometryChanged(const int2 newPos, const int2 newDim, const int2 oldPos, const int2 oldDim);
 		virtual bool CommandNotify(const Command& cmd);
 
 		virtual bool AddConsoleLine(const std::string& msg, const std::string& section, int level);

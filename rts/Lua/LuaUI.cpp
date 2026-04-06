@@ -32,6 +32,7 @@
 #include "Sim/Misc/GlobalSynced.h"
 #include "Sim/Misc/LosHandler.h"
 #include "Sim/Units/CommandAI/CommandDescription.h"
+#include "Sim/Weapons/WeaponDefHandler.h"
 #include "System/EventHandler.h"
 #include "System/Log/ILog.h"
 #include "System/FileSystem/FileHandler.h"
@@ -41,7 +42,6 @@
 #include "System/Threading/SpringThreading.h"
 #include "lib/luasocket/src/luasocket.h"
 
-#include <cstdio>
 #include <cctype>
 
 CONFIG(bool, LuaSocketEnabled)
@@ -64,6 +64,11 @@ DECL_FREE_HANDLER(CLuaUI, luaUI)
 
 
 /******************************************************************************/
+
+/***
+ * @class UI : Callins
+ * @see Callins
+ */
 
 CLuaUI::CLuaUI()
 : CLuaHandle("LuaUI", LUA_HANDLE_ORDER_UI, true, false)
@@ -133,10 +138,14 @@ CLuaUI::CLuaUI()
 
 	lua_pushvalue(L, LUA_GLOBALSINDEX);
 
+	// version of loadstring allowing bytecode in some situations
+	LuaPushNamedCFunc(L, "loadstring", CLuaHandle::LoadStringData);
+
 	AddBasicCalls(L); // into Global
 
 	// load the spring libraries
 	if (!LoadCFunctions(L)                                                   ||
+	    !AddCommonModules(L)						 ||
 	    !AddEntriesToTable(L, "VFS",         LuaVFS::PushUnsynced)           ||
 	    !AddEntriesToTable(L, "VFS",         LuaZipFileReader::PushUnsynced) ||
 	    !AddEntriesToTable(L, "VFS",         LuaZipFileWriter::PushUnsynced) ||
@@ -163,7 +172,15 @@ CLuaUI::CLuaUI()
 		KillLua();
 		return;
 	}
+
+	lua_getglobal(L, "Script");
+		LuaPushNamedCFunc(L, "GetWatchExplosion",    GetWatchExplosionDef);
+		LuaPushNamedCFunc(L, "SetWatchExplosion",    SetWatchExplosionDef);
+	lua_pop(L, 1); // Script
+
 	InitializeRmlUi();
+
+	watchExplosionDefs.resize(weaponDefHandler->NumWeaponDefs(), false);
 
 	lua_settop(L, 0);
 	if (!LoadCode(L, std::move(code), file)) {
@@ -187,10 +204,47 @@ CLuaUI::~CLuaUI()
 	luaUI = nullptr;
 }
 
+#define GetWatchDef(DefType)                                                \
+	int CLuaUI::GetWatch ## DefType ## Def(lua_State* L) {        \
+		CLuaHandle* lhs = GetHandle(L);                         \
+		const auto& vec = lhs->watch ## DefType ## Defs;                    \
+                                                                            \
+		const uint32_t defIdx = luaL_checkint(L, 1);                        \
+                                                                           \
+		if (defIdx >= vec.size())                                           \
+			return 0;                                                       \
+                                                                            \
+		lua_pushboolean(L, vec[defIdx]);                                    \
+		return 1;                                                           \
+	}
+
+#define SetWatchDef(DefType)                                                \
+	int CLuaUI::SetWatch ## DefType ## Def(lua_State* L) {        \
+		CLuaHandle* lhs = GetHandle(L);                         \
+		auto& vec = lhs->watch ## DefType ## Defs;                          \
+                                                                            \
+		const uint32_t defIdx = luaL_checkint(L, 1);                        \
+                                                                            \
+		if (defIdx >= vec.size())                                           \
+			return 0;                                                       \
+                                                                            \
+		vec[defIdx] = luaL_checkboolean(L, 2);                              \
+		return 0;                                                           \
+	}
+
+GetWatchDef(Explosion)
+SetWatchDef(Explosion)
+
+
 void CLuaUI::InitLuaSocket(lua_State* L) {
 	std::string code;
-	std::string filename = "socket.lua";
-	CFileHandler f(filename);
+	std::string filename = "LuaSocket/socket.lua";
+	CFileHandler f(filename, SPRING_VFS_BASE);
+
+	if (!f.FileExists()) {
+		LOG_L(L_ERROR, "Error loading %s (file does not exist)", filename.c_str());
+		return;
+	}
 
 	LUA_OPEN_LIB(L, luaopen_socket_core);
 
@@ -216,7 +270,6 @@ string CLuaUI::LoadFile(const string& name, const std::string& mode) const
 static bool IsDisallowedCallIn(const string& name)
 {
 	switch (hashString(name.c_str())) {
-		case hashString("Explosion"     ): { return true; } break;
 		case hashString("DrawUnit"      ): { return true; } break;
 		case hashString("DrawFeature"   ): { return true; } break;
 		case hashString("DrawShield"    ): { return true; } break;
@@ -273,7 +326,7 @@ bool CLuaUI::LoadCFunctions(lua_State* L)
 /******************************************************************************/
 
 /***
- * @function ConfigureLayout
+ * @function UI:ConfigureLayout
  */
 bool CLuaUI::ConfigureLayout(const string& command)
 {

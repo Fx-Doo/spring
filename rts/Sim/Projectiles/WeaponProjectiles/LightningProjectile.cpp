@@ -47,7 +47,16 @@ void CLightningProjectile::Update()
 	if (--ttl <= 0) {
 		deleteMe = true;
 	} else {
-		explGenHandler.GenExplosion(cegID, startPos + ((targetPos - startPos) / ttl), (targetPos - startPos), 0.0f, displacements1[0], 0.0f, owner(), nullptr);
+		explGenHandler.GenExplosion(
+			cegID,
+			startPos + ((targetPos - startPos) / ttl),
+			targetPos - startPos,
+			0.0f,
+			displacements1[0],
+			0.0f,
+			owner(),
+			ExplosionHitObject()
+		);
 	}
 
 	for (size_t d = 1; d < displacements_size; ++d) {
@@ -64,7 +73,7 @@ void CLightningProjectile::Draw()
 	if (!validTextures[0])
 		return;
 
-	UpdateWeaponAnimParams();
+	UpdateAnimParams();
 
 	uint8_t col[4] {
 		(uint8_t)(color.x * 255),
@@ -87,7 +96,8 @@ void CLightningProjectile::Draw()
 			tempPos  = (startPos * (1.0f - f)) + (targetPos * f);
 
 			const auto& WDV = weaponDef->visuals;
-			AddWeaponEffectsQuad<1>(
+			AddEffectsQuad<1>(
+				WDV.texture1->pageNum,
 				{ tempPosO + (dir1 * (displacement[d    ] + WDV.thickness)), WDV.texture1->xstart, WDV.texture1->ystart, col },
 				{ tempPos  + (dir1 * (displacement[d + 1] + WDV.thickness)), WDV.texture1->xend,   WDV.texture1->ystart, col },
 				{ tempPos  + (dir1 * (displacement[d + 1] - WDV.thickness)), WDV.texture1->xend,   WDV.texture1->yend,   col },

@@ -40,6 +40,7 @@
 #include "System/type2.h"
 #include "System/Sound/ISoundChannels.h"
 #include "System/SpringHash.h"
+#include "Utils/UnitTrapCheckUtils.h"
 
 #include "System/Misc/TracyDefs.h"
 
@@ -101,6 +102,8 @@ CR_BIND_DERIVED(CGroundMoveType, AMoveType, (nullptr))
 CR_REG_METADATA(CGroundMoveType, (
 	CR_IGNORED(pathController),
 
+	CR_IGNORED(jobId),
+
 	CR_MEMBER(currWayPoint),
 	CR_MEMBER(nextWayPoint),
 
@@ -143,6 +146,8 @@ CR_REG_METADATA(CGroundMoveType, (
 	CR_MEMBER(forceFromStaticCollidees),
 
 	CR_MEMBER(pathID),
+	CR_MEMBER(nextPathId),
+	CR_MEMBER(deletePathId),
 
 	CR_MEMBER(numIdlingUpdates),
 	CR_MEMBER(numIdlingSlowUpdates),
@@ -150,13 +155,26 @@ CR_REG_METADATA(CGroundMoveType, (
 	CR_MEMBER(wantedHeading),
 	CR_MEMBER(minScriptChangeHeading),
 
+	CR_MEMBER(wantRepathFrame),
+	CR_MEMBER(lastRepathFrame),
+	CR_MEMBER(bestLastWaypointDist),
+	CR_MEMBER(bestReattemptedLastWaypointDist),
+	CR_MEMBER(setHeading),
+	CR_MEMBER(setHeadingDir),
+	CR_MEMBER(limitSpeedForTurning),
+
+	CR_MEMBER(oldSpeed),
+	CR_MEMBER(newSpeed),
+
 	CR_MEMBER(atGoal),
 	CR_MEMBER(atEndOfPath),
 	CR_MEMBER(wantRepath),
+	CR_MEMBER(lastWaypoint),
 
 	CR_MEMBER(reversing),
 	CR_MEMBER(idling),
 	CR_MEMBER(pushResistant),
+	CR_MEMBER(pushResistanceBlockActive),
 	CR_MEMBER(canReverse),
 	CR_MEMBER(useMainHeading),
 	CR_MEMBER(useRawMovement),
@@ -165,8 +183,6 @@ CR_REG_METADATA(CGroundMoveType, (
 	CR_MEMBER(positionStuck),
 	CR_MEMBER(forceStaticObjectCheck),
 	CR_MEMBER(avoidingUnits),
-	CR_MEMBER(setHeading),
-	CR_MEMBER(setHeadingDir),
 
 	CR_POSTLOAD(PostLoad),
 	CR_PREALLOC(GetPreallocContainer)
@@ -812,25 +828,35 @@ void CGroundMoveType::SlowUpdate()
 			}
 
 			if (wantRepath) {
-				// When repaths are requested, they are pre-emptive and are made without
-				// confirmation that it is really necessary. Give the unit a chance to
-				// make progress: for example, when it got pushed against a building, but
-				// is otherwise moving on. Pathing is expensive so we really want to keep
-				// repathing to a minimum.
-				// Resolution distance checks kept to 1/10th of an Elmo to reduce the
-				// amount of time a unit can spend making insignificant progress, every
-				// SlowUpdate.
-				float curDist = math::floorf(currWayPoint.distance2D(owner->pos) * 10.f) / 10.f;
-				if (curDist < bestLastWaypointDist) {
-					bestLastWaypointDist = curDist;
-					wantRepathFrame = gs->frameNum;
+				// If the unit is being asked to walk into an exit-only zone, but finds itself outside of that, then
+				// force a repath: we know the path is no longer valid.
+				bool fallenOutOfExitOnly = (owner->moveDef->IsInExitOnly(currWayPoint) == true)
+				                        && (owner->moveDef->IsInExitOnly(owner->pos) == false);
+
+				if (!fallenOutOfExitOnly) {
+					// When repaths are requested, they are pre-emptive and are made without
+					// confirmation that it is really necessary. Give the unit a chance to
+					// make progress: for example, when it got pushed against a building, but
+					// is otherwise moving on. Pathing is expensive so we really want to keep
+					// repathing to a minimum.
+					// Resolution distance checks kept to 1/10th of an Elmo to reduce the
+					// amount of time a unit can spend making insignificant progress, every
+					// SlowUpdate.
+					float curDist = math::floorf(currWayPoint.distance2D(owner->pos) * 10.f) / 10.f;
+					if (curDist < bestLastWaypointDist) {
+						bestLastWaypointDist = curDist;
+						wantRepathFrame = gs->frameNum;
+					}
+				} else {
+					lastWaypoint = false;
 				}
 
-				// lastWaypoint typically retries a repath and most likely won;t get closer, so
-				// in this case, don't wait around making the unit try to run inot an obstacle for
+				// lastWaypoint typically retries a repath and most likely won't get closer, so
+				// in this case, don't wait around making the unit try to run into an obstacle for
 				// longer than absolutely necessary.
-				bool timeForRepath = gs->frameNum >= wantRepathFrame + modInfo.pfRepathDelayInFrames
-									&& (gs->frameNum >= lastRepathFrame + modInfo.pfRepathMaxRateInFrames || lastWaypoint);
+				bool timeForRepath = fallenOutOfExitOnly
+				                   || (    gs->frameNum >= wantRepathFrame + modInfo.pfRepathDelayInFrames
+				                       && (gs->frameNum >= lastRepathFrame + modInfo.pfRepathMaxRateInFrames || lastWaypoint) );
 
 				// can't request a new path while the unit is stuck in terrain/static objects
 				if (timeForRepath){
@@ -1020,7 +1046,7 @@ void CGroundMoveType::UpdateTraversalPlan() {
 	earlyCurrWayPoint = currWayPoint;
 	earlyNextWayPoint = nextWayPoint;
 
-	// Check wether the new path is ready.
+	// Check whether the new path is ready.
 	if (nextPathId != 0) {
 		float3 tempWaypoint = pathManager->NextWayPoint(owner, nextPathId, 0,   owner->pos, std::max(WAYPOINT_RADIUS, currentSpeed * 1.05f), true);
 
@@ -1983,7 +2009,7 @@ float3 CGroundMoveType::GetObstacleAvoidanceDir(const float3& desiredDir) {
 
 
 #if 0
-// Calculates an aproximation of the physical 2D-distance between given two objects.
+// Calculates an approximation of the physical 2D-distance between given two objects.
 // Old, no longer used since all separation tests are based on FOOTPRINT_RADIUS now.
 float CGroundMoveType::Distance2D(CSolidObject* object1, CSolidObject* object2, float marginal)
 {
@@ -2028,7 +2054,7 @@ float CGroundMoveType::Distance2D(CSolidObject* object1, CSolidObject* object2, 
 unsigned int CGroundMoveType::GetNewPath()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	assert(!ThreadPool::inMultiThreadedSection);
+	assert(!ThreadPool::IsInMultiThreadedSection());
 	unsigned int newPathID = 0;
 
 	#ifdef PATHING_DEBUG
@@ -2080,7 +2106,7 @@ unsigned int CGroundMoveType::GetNewPath()
 void CGroundMoveType::ReRequestPath(bool forceRequest) {
 	RECOIL_DETAILED_TRACY_ZONE;
 	if (forceRequest) {
-		assert(!ThreadPool::inMultiThreadedSection);
+		assert(!ThreadPool::IsInMultiThreadedSection());
 		// StopEngine(false);
 		StartEngine(false);
 		wantRepath = false;
@@ -2406,18 +2432,12 @@ void CGroundMoveType::StartEngine(bool callScript) {
 			// makes no sense to call this unless we have a new path
 			owner->script->StartMoving(reversing);
 		}
-
-		// Due to how push resistant units work, they can trap units when they stop moving.
-		// Have units check they are not trapped when beginning to move is any push resistant units
-		// are used by the game.
-		if (!forceStaticObjectCheck)
-			forceStaticObjectCheck = (unitDefHandler->NumPushResistantUnitDefs() > 0);
 	}
 }
 
 void CGroundMoveType::StopEngine(bool callScript, bool hardStop) {
 	RECOIL_DETAILED_TRACY_ZONE;
-	assert(!ThreadPool::inMultiThreadedSection);
+	assert(!ThreadPool::IsInMultiThreadedSection());
 	if (pathID != 0 || nextPathId != 0) {
 		if (pathID != 0) {
 			pathManager->DeletePath(pathID);
@@ -2469,7 +2489,7 @@ No more trials will be done before a new goal is given.
 void CGroundMoveType::Fail(bool callScript)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	assert(!ThreadPool::inMultiThreadedSection);
+	assert(!ThreadPool::IsInMultiThreadedSection());
 	LOG_L(L_DEBUG, "[%s] unit %i failed", __func__, owner->id);
 
 	StopEngine(callScript);
@@ -2775,10 +2795,9 @@ void CGroundMoveType::HandleUnitCollisions(
 	const bool allowSAT = modInfo.allowSepAxisCollisionTest;
 	const bool forceSAT = (colliderParams.z > 0.1f);
 
-	auto& comp = Sim::systemGlobals.GetSystemComponent<GroundMoveSystemComponent>();
 	const float3 crushImpulse = owner->speed * owner->mass * Sign(int(!reversing));
 
-	// Push resistent units when stopped impacting pathing and also cannot be pushed, so it is important that such
+	// Push resistant units when stopped impacting pathing and also cannot be pushed, so it is important that such
 	// units are not going to prevent other units from moving around them if they are near narrow pathways.
 	const float colliderSeparationDist = (pushResistant && pushResistanceBlockActive) ? 0.f : colliderUD->separationDistance;
 
@@ -2993,7 +3012,6 @@ void CGroundMoveType::HandleFeatureCollisions(
 	const bool allowSAT = modInfo.allowSepAxisCollisionTest;
 	const bool forceSAT = (colliderParams.z > 0.1f);
 
-	auto& comp = Sim::systemGlobals.GetSystemComponent<GroundMoveSystemComponent>();
 	const float3 crushImpulse = owner->speed * owner->mass * Sign(int(!reversing));
 	MoveTypes::CheckCollisionQuery colliderInfo(collider);
 
@@ -3569,6 +3587,7 @@ bool CGroundMoveType::UpdateOwnerSpeed(float oldSpeedAbs, float newSpeedAbs, flo
 		} else {
 			owner->Block();
 			pushResistanceBlockActive = true;
+			RegisterUnitForUnitTrapCheck(owner);
 		}
 
 		// this has to be done manually because units don't trigger it with block commands

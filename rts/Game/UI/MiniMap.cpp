@@ -71,6 +71,7 @@ CONFIG(bool, MiniMapIcons).defaultValue(true).headlessValue(false);
 CONFIG(int, MiniMapDrawCommands).defaultValue(1).headlessValue(0).minimumValue(0);
 
 CONFIG(bool, MiniMapDrawProjectiles).defaultValue(true).headlessValue(false);
+CONFIG(bool, MiniMapDrawPings).defaultValue(true).headlessValue(false).description("Whether to draw pings on the minimap.");
 CONFIG(bool, SimpleMiniMapColors).defaultValue(false);
 
 CONFIG(bool, MiniMapRenderToTexture).defaultValue(true).safemodeValue(false).description("Asynchronous render MiniMap to a texture independent of screen FPS.");
@@ -78,8 +79,7 @@ CONFIG(int, MiniMapRefreshRate).defaultValue(0).minimumValue(0).description("The
 
 CONFIG(bool, DualScreenMiniMapAspectRatio).defaultValue(true).description("Whether minimap preserves aspect ratio on dual screen mode.");
 
-CONFIG(bool, MiniMapCanFlip).defaultValue(false).description("Whether minimap inverts coordinates when camera Y rotation is between 90 and 270 degrees.");
-
+CONFIG(int, MiniMapCanFlip).defaultValue(0).minimumValue(0).maximumValue(1).description("Whether minimap inverts coordinates when camera Y rotation is between 90 and 270 degrees natively (1) or hands Lua control (0).");
 
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
@@ -108,7 +108,7 @@ CMiniMap::CMiniMap()
 
 	ConfigUpdate();
 
-	configHandler->NotifyOnChange(this, {"DualScreenMiniMapAspectRatio", "MiniMapCanFlip", "MiniMapDrawProjectiles", "MiniMapCursorScale", "MiniMapIcons", "MiniMapDrawCommands", "MiniMapButtonSize"});
+	configHandler->NotifyOnChange(this, {"DualScreenMiniMapAspectRatio", "MiniMapCanFlip", "MiniMapDrawProjectiles", "MiniMapDrawPings", "MiniMapCursorScale", "MiniMapIcons", "MiniMapDrawCommands", "MiniMapButtonSize"});
 
 	UpdateGeometry();
 
@@ -192,13 +192,12 @@ void CMiniMap::ConfigUpdate()
 	aspectRatio = configHandler->GetBool("DualScreenMiniMapAspectRatio");
 	buttonSize = configHandler->GetInt("MiniMapButtonSize");
 	drawProjectiles = configHandler->GetBool("MiniMapDrawProjectiles");
+	drawPings = configHandler->GetBool("MiniMapDrawPings");
 	drawCommands = configHandler->GetInt("MiniMapDrawCommands");
 	cursorScale = configHandler->GetFloat("MiniMapCursorScale");
 	useIcons = configHandler->GetBool("MiniMapIcons");
 
-	minimapCanFlip = configHandler->GetBool("MiniMapCanFlip");
-	if (!minimapCanFlip)
-		flipped = false;
+	minimapCanFlip = configHandler->GetInt("MiniMapCanFlip");
 }
 
 void CMiniMap::ConfigNotify(const std::string& key, const std::string& value)
@@ -255,10 +254,34 @@ void CMiniMap::ToggleMaximized(bool _maxspect)
 		curDim = oldDim;
 	}
 
+	eventHandler.MiniMapStateChanged(minimized,maximized, slaveDrawMode);
+
 	// needed for SetMaximizedGeometry
 	UpdateGeometry();
 }
 
+void CMiniMap::SetRotation(RotationOptions state) // 0 1 2 3: 0 90 180 270
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+
+	if (state == rotation)
+		return;
+
+	const float oldRotation = static_cast<int>(rotation) * math::HALFPI;
+	rotation = state;
+	eventHandler.MiniMapRotationChanged(static_cast<int>(rotation) * math::HALFPI, oldRotation);
+}
+
+void CMiniMap::SetMinimized(bool state)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	
+	if (minimized == state)
+		return;
+
+	minimized = state;
+	eventHandler.MiniMapStateChanged(minimized, maximized, slaveDrawMode);
+}
 
 void CMiniMap::SetAspectRatioGeometry(const float& viewSizeX, const float& viewSizeY,
 		const float& viewPosX, const float& viewPosY, const MINIMAP_POSITION position)
@@ -351,6 +374,7 @@ void CMiniMap::SetSlaveMode(bool newMode)
 	}
 
 	slaveDrawMode = newMode;
+	eventHandler.MiniMapStateChanged(minimized, maximized, slaveDrawMode);
 	UpdateGeometry();
 }
 
@@ -392,6 +416,12 @@ void CMiniMap::ConfigCommand(const std::string& line)
 		case hashString("drawprojectiles"): {
 			drawProjectiles = (words.size() >= 2) ? !!atoi(words[1].c_str()) : !drawProjectiles;
 		} break;
+		case hashString("drawpings"): {
+			drawPings = (words.size() >= 2) ? !!atoi(words[1].c_str()) : !drawPings;
+			if (!drawPings) {
+				notes.clear();
+			}
+		} break;
 		case hashString("simplecolors"): {
 			simpleColors = (words.size() >= 2) ? !!atoi(words[1].c_str()) : !simpleColors;
 		} break;
@@ -413,7 +443,8 @@ void CMiniMap::ConfigCommand(const std::string& line)
 			if (globalRendering->dualScreenMode)
 				return;
 
-			minimized = (words.size() >= 2) ? !!atoi(words[1].c_str()) : !minimized;
+			const bool newMinimized = (words.size() >= 2) ? !!atoi(words[1].c_str()) : !minimized;
+			SetMinimized(newMinimized);
 		} break;
 
 		case hashString("max"):
@@ -656,7 +687,7 @@ bool CMiniMap::MousePress(int x, int y, int button)
 
 	if (minimized) {
 		if ((x < buttonSize) && (y < buttonSize)) {
-			minimized = false;
+			SetMinimized(false);
 			return true;
 		}
 
@@ -751,7 +782,18 @@ void CMiniMap::MouseMove(int x, int y, int dx, int dy, int button)
 		}
 
 		if (KeyInput::GetKeyModState(KMOD_SHIFT))
-			curDim.x = (curDim.y * mapDims.mapx) / mapDims.mapy;
+			switch (rotation)
+			{
+				case ROTATION_0:
+				case ROTATION_180:
+					curDim.x = (curDim.y * mapDims.mapx) / mapDims.mapy;
+					break;
+
+				case ROTATION_90:
+				case ROTATION_270:
+					curDim.x = (curDim.y * mapDims.mapy) / mapDims.mapx;
+					break;
+			}
 
 		curDim.x = std::max(5, curDim.x);
 		curDim.y = std::max(5, curDim.y);
@@ -801,7 +843,7 @@ void CMiniMap::MouseRelease(int x, int y, int button)
 		}
 
 		if (showButtons && minimizeBox.Inside(x, y)) {
-			minimized = true;
+			SetMinimized(true);
 			return;
 		}
 	}
@@ -843,9 +885,25 @@ float3 CMiniMap::GetMapPosition(int x, int y) const
 	float sx = std::clamp(float(x - tmpPos.x) / curDim.x, 0.0f, 1.0f);
 	float sz = std::clamp(float(y + tmpPos.y) / curDim.y, 0.0f, 1.0f);
 
-	if (flipped) {
-		sx = 1 - sx;
-		sz = 1 - sz;
+	switch (rotation)
+	{
+	case ROTATION_0:
+		break;
+
+	case ROTATION_90:
+		std::swap(sx, sz);
+		sx = 1.0f - sx;
+		break;
+	
+	case ROTATION_180:
+		sx = 1.0f - sx;
+		sz = 1.0f - sz;
+		break;
+	
+	case ROTATION_270:
+		std::swap(sx, sz);
+		sz = 1.0f - sz;
+		break;
 	}
 
 	return {mapX * sx, readMap->GetCurrMaxHeight(), mapZ * sz};
@@ -962,6 +1020,11 @@ std::string CMiniMap::GetTooltip(int x, int y)
 void CMiniMap::AddNotification(float3 pos, float3 color, float alpha)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
+
+	if (!drawPings) {
+		return;
+	}
+
 	Notification n;
 	n.pos = pos;
 	n.color[0] = color.x;
@@ -1011,11 +1074,6 @@ void CMiniMap::ApplyConstraintsMatrix() const
 	}
 }
 
-float CMiniMap::GetRotation() {
-	RECOIL_DETAILED_TRACY_ZONE;
-	return flipped ? math::PI : 0;
-}
-
 /******************************************************************************/
 
 void CMiniMap::Update()
@@ -1039,9 +1097,10 @@ void CMiniMap::Update()
 	/* Below the renderToTexture check above,
 	 * since that other rendering pipeline
 	 * does not support minimap flipping. */
-	if (minimapCanFlip) {
-		const float rotY = fmod(abs(camHandler->GetCurrentController().GetRot().y), 2 * math::PI);
-		flipped = rotY > math::PI/2 && rotY <= 3 * math::PI/2;
+	if (minimapCanFlip){
+		const float rotY = ClampRad(camHandler->GetCurrentController().GetRot().y);
+		const RotationOptions newRot = rotY > math::HALFPI && rotY <= 3 * math::HALFPI ? ROTATION_180 : ROTATION_0;
+		SetRotation(newRot);
 	}
 
 	float refreshRate = minimapRefreshRate;
@@ -1059,6 +1118,14 @@ void CMiniMap::Update()
 
 	fbo.Bind();
 	UpdateTextureCache();
+
+	/* Would need a larger refactor for this to become SetGeometry since the entire file
+	 * continuously changes dim and pos from curDim and curPos regularly from many functions */
+	if (curPos != lastPos || curDim != lastDim) {
+		eventHandler.MiniMapGeometryChanged(curPos, curDim, lastPos, lastDim);
+		lastPos = curPos;
+		lastDim = curDim;
+	}
 
 	// gets done in CGame
 	// fbo.Unbind();
@@ -1349,12 +1416,27 @@ void CMiniMap::DrawCameraFrustumAndMouseSelection()
 
 	// switch to top-down map/world coords (z is twisted with y compared to the real map/world coords)
 	glPushMatrix();
-	if (flipped) {
-		glTranslatef(+1.0f, 0.0f, 0.0f);
-		glScalef(-1.0f / (mapDims.mapx * SQUARE_SIZE), +1.0f / (mapDims.mapy * SQUARE_SIZE), 1.0f);
-	} else {
-		glTranslatef(0.0f, +1.0f, 0.0f);
-		glScalef(+1.0f / (mapDims.mapx * SQUARE_SIZE), -1.0f / (mapDims.mapy * SQUARE_SIZE), 1.0f);
+
+	switch (rotation) 
+	{
+		case ROTATION_0:
+			glTranslatef(0.0f, +1.0f, 0.0f);
+			glScalef(+1.0f / (mapDims.mapx * SQUARE_SIZE), -1.0f / (mapDims.mapy * SQUARE_SIZE), +1.0f);
+			break;
+		case ROTATION_90:
+			glScalef(-1.0f / (mapDims.mapy * SQUARE_SIZE), +1.0f / (mapDims.mapx * SQUARE_SIZE), +1.0f);
+			glRotatef(90.0f, 0.0f, 0.0f, 1.0f);
+			break;
+		case ROTATION_180:
+			glTranslatef(+1.0f, 0.0f, 0.0f);
+			glScalef(+1.0f / (mapDims.mapx * SQUARE_SIZE), +1.0f / (mapDims.mapy * SQUARE_SIZE), +1.0f);
+			glRotatef(180.0f, 0.0f, 1.0f, 0.0f);
+			break;
+		case ROTATION_270:
+			glTranslatef(+1.0f, +1.0f, 0.0f);
+			glScalef(-1.0f / (mapDims.mapy * SQUARE_SIZE), +1.0f / (mapDims.mapx * SQUARE_SIZE), +1.0f);
+			glRotatef(-90.0f, 0.0f, 0.0f, 1.0f);
+			break;
 	}
 
 	static auto& rb = RenderBuffer::GetTypedRenderBuffer<VA_TYPE_2D0>();
@@ -1632,7 +1714,7 @@ void CMiniMap::DrawButtons()
 void CMiniMap::DrawNotes()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	if (notes.empty()) {
+	if (notes.empty() || !drawPings) {
 		return;
 	}
 
@@ -1746,20 +1828,39 @@ void CMiniMap::DrawBackground() const
 	auto& rb = RenderBuffer::GetTypedRenderBuffer<VA_TYPE_2DT>();
 	rb.AssertSubmission();
 
-	if (flipped) {
-		rb.AddQuadTriangles(
-			{ 1.0f, 1.0f, 0.0f, 1.0f }, // tl
-			{ 0.0f, 1.0f, 1.0f, 1.0f }, // tr
-			{ 0.0f, 0.0f, 1.0f, 0.0f }, // br
-			{ 1.0f, 0.0f, 0.0f, 0.0f }  // bl
-		);
-	} else {
-		rb.AddQuadTriangles(
-			{ 0.0f, 0.0f, 0.0f, 1.0f }, // tl
-			{ 1.0f, 0.0f, 1.0f, 1.0f }, // tr
-			{ 1.0f, 1.0f, 1.0f, 0.0f }, // br
-			{ 0.0f, 1.0f, 0.0f, 0.0f }  // bl
-		);
+	switch (rotation){
+		case ROTATION_0:
+			rb.AddQuadTriangles(
+				{ 0.0f, 0.0f, 0.0f, 1.0f }, // tl
+				{ 1.0f, 0.0f, 1.0f, 1.0f }, // tr
+				{ 1.0f, 1.0f, 1.0f, 0.0f }, // br
+				{ 0.0f, 1.0f, 0.0f, 0.0f }  // bl
+			);
+			break;
+		case ROTATION_90:
+			rb.AddQuadTriangles(
+				{ 1.0f, 0.0f, 0.0f, 1.0f }, // tl
+				{ 1.0f, 1.0f, 1.0f, 1.0f }, // tr
+				{ 0.0f, 1.0f, 1.0f, 0.0f }, // br
+				{ 0.0f, 0.0f, 0.0f, 0.0f }  // bl
+			);
+			break;
+		case ROTATION_180:
+			rb.AddQuadTriangles(
+				{ 1.0f, 1.0f, 0.0f, 1.0f }, // tl
+				{ 0.0f, 1.0f, 1.0f, 1.0f }, // tr
+				{ 0.0f, 0.0f, 1.0f, 0.0f }, // br
+				{ 1.0f, 0.0f, 0.0f, 0.0f }  // bl
+			);
+			break;
+		case ROTATION_270:
+			rb.AddQuadTriangles(
+				{ 0.0f, 1.0f, 0.0f, 1.0f }, // tl
+				{ 0.0f, 0.0f, 1.0f, 1.0f }, // tr
+				{ 1.0f, 0.0f, 1.0f, 0.0f }, // br
+				{ 1.0f, 1.0f, 0.0f, 0.0f }  // bl
+			);
+			break;		
 	}
 
 	//glMatrixMode(GL_MODELVIEW);
@@ -1860,16 +1961,30 @@ void CMiniMap::DrawWorldStuff() const
 	ZoneScoped;
 	glPushMatrix();
 
-	if (flipped) {
-		glTranslatef(+1.0f, 0.0f, 0.0f);
-		glScalef(-1.0f / (mapDims.mapx * SQUARE_SIZE), +1.0f / (mapDims.mapy * SQUARE_SIZE), 1.0f);
-	} else {
-		glTranslatef(0.0f, +1.0f, 0.0f);
-		glScalef(+1.0f / (mapDims.mapx * SQUARE_SIZE), -1.0f / (mapDims.mapy * SQUARE_SIZE), 1.0f);
+	// normalize coords
+	glRotatef(90.0f, +1.0f, 0.0f, 0.0f); // real 'world' coordinates
+	
+	switch (rotation) // skip the y-coord (Lua's DrawScreen is perspective and so any z-coord in it influence the x&y, too)
+	{
+		case ROTATION_0:
+			glTranslatef(0.0f, 0.0f, -1.0f);
+			glScalef(+1.0f / (mapDims.mapx * SQUARE_SIZE), 0.0f, +1.0f / (mapDims.mapy * SQUARE_SIZE));
+			break;
+		case ROTATION_90:
+			glScalef(+1.0f / (mapDims.mapy * SQUARE_SIZE), 0.0f, +1.0f / (mapDims.mapx * SQUARE_SIZE));
+			glRotatef(90.0f, 0.0f, 1.0f, 0.0f);
+			break;
+		case ROTATION_180:
+			glTranslatef(+1.0f, 0.0f, 0.0f);
+			glScalef(+1.0f / (mapDims.mapx * SQUARE_SIZE), 0.0f, +1.0f / (mapDims.mapy * SQUARE_SIZE));
+			glRotatef(180.0f, 0.0f, 1.0f, 0.0f);
+			break;
+		case ROTATION_270:
+			glTranslatef(+1.0f, 0.0f, -1.0f);
+			glScalef(+1.0f / (mapDims.mapy * SQUARE_SIZE), 0.0f, +1.0f / (mapDims.mapx * SQUARE_SIZE));
+			glRotatef(-90.0f, 0.0f, 1.0f, 0.0f);
+			break;
 	}
-
-	glRotatef(-90.0f, +1.0f, 0.0f, 0.0f); // real 'world' coordinates
-	glScalef(1.0f, 0.0f, 1.0f); // skip the y-coord (Lua's DrawScreen is perspective and so any z-coord in it influence the x&y, too)
 
 	// draw the projectiles
 	if (drawProjectiles) {

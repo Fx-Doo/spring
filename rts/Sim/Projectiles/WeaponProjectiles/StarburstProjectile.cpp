@@ -74,13 +74,13 @@ CStarburstProjectile::CStarburstProjectile(const ProjectileParams& params): CWea
 
 	if (weaponDef != nullptr) {
 		maxSpeed = weaponDef->projectilespeed;
-		ttl = weaponDef->flighttime;
+		ttl = params.ttl;
 
-		// Default uptime is -1. Positive values override the weapondef.
+		// Default uptime is -1. Positive values override the projectile params.
 		if (uptime < 0)
 			uptime = weaponDef->uptime * GAME_SPEED;
 
-		if (weaponDef->flighttime == 0)
+		if (ttl == 0)
 			ttl = std::min(3000.0f, uptime + myrange / maxSpeed + 100);
 	}
 
@@ -148,7 +148,16 @@ void CStarburstProjectile::Update()
 	}
 
 	if (ttl > 0)
-		explGenHandler.GenExplosion(cegID, pos, dir, ttl, damages->damageAreaOfEffect, 0.0f, owner(), nullptr);
+		explGenHandler.GenExplosion(
+			cegID,
+			pos,
+			dir,
+			ttl,
+			damages->damageAreaOfEffect,
+			0.0f,
+			owner(),
+			ExplosionHitObject()
+		);
 
 	UpdateTracerPart();
 	UpdateSmokeTrail();
@@ -349,7 +358,7 @@ void CStarburstProjectile::Draw()
 	if (!validTextures[0])
 		return;
 
-	UpdateWeaponAnimParams();
+	UpdateAnimParams();
 
 	const auto wt3 = weaponDef->visuals.texture3;
 	const auto wt1 = weaponDef->visuals.texture1;
@@ -379,7 +388,8 @@ void CStarburstProjectile::Draw()
 			SColor col = lightYellow * std::clamp(alpha, 0.0f, 1.0f);
 			col.a = 1;
 
-			AddWeaponEffectsQuad<3>(
+			AddEffectsQuad<3>(
+				wt3->pageNum,
 				{ interPos - camera->GetRight() * drawsize - camera->GetUp() * drawsize, wt3->xstart, wt3->ystart, col },
 				{ interPos + camera->GetRight() * drawsize - camera->GetUp() * drawsize, wt3->xend,   wt3->ystart, col },
 				{ interPos + camera->GetRight() * drawsize + camera->GetUp() * drawsize, wt3->xend,   wt3->yend,   col },
@@ -395,7 +405,8 @@ void CStarburstProjectile::Draw()
 	constexpr float fsize = 25.0f;
 
 	if (validTextures[1]) {
-		AddWeaponEffectsQuad<1>(
+		AddEffectsQuad<1>(
+			wt1->pageNum,
 			{ drawPos - camera->GetRight() * fsize - camera->GetUp() * fsize, wt1->xstart, wt1->ystart, lightRed },
 			{ drawPos + camera->GetRight() * fsize - camera->GetUp() * fsize, wt1->xend,   wt1->ystart, lightRed },
 			{ drawPos + camera->GetRight() * fsize + camera->GetUp() * fsize, wt1->xend,   wt1->yend,   lightRed },

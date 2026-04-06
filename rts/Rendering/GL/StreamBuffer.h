@@ -14,7 +14,7 @@
 #include <stdexcept>
 
 
-#include "System/SpringMem.h"
+#include "System/MemoryOverride.hpp"
 #include "System/SpringMath.h"
 #include "System/TypeToStr.h"
 #include "Rendering/GlobalRendering.h"
@@ -146,7 +146,7 @@ public:
 
 	void Kill(bool deleteBuffer) override {
 		if (!clientMem && buffer != nullptr) {
-			spring::FreeAlignedMemory(buffer);
+			recoil::aligned_free(buffer);
 			buffer = nullptr;
 		}
 
@@ -166,7 +166,7 @@ public:
 		else if (buffer == nullptr) {
 			clientMem = false;
 
-			buffer = static_cast<T*>(spring::AllocateAlignedMemory(this->byteSize, 256));
+			buffer = static_cast<T*>(recoil::aligned_alloc(256, this->byteSize));
 			assert(buffer);
 		}
 		return buffer + this->mapElemOffet;
@@ -212,7 +212,7 @@ public:
 
 	void Kill(bool deleteBuffer) override {
 		if (!clientMem && buffer != nullptr) {
-			spring::FreeAlignedMemory(buffer);
+			recoil::aligned_free(buffer);
 			buffer = nullptr;
 		}
 		if (deleteBuffer) this->DeleteBuffer();
@@ -231,7 +231,7 @@ public:
 		else if (buffer == nullptr) {
 			clientMem = false;
 
-			buffer = static_cast<T*>(spring::AllocateAlignedMemory(this->byteSize, 256));
+			buffer = static_cast<T*>(recoil::aligned_alloc(256, this->byteSize));
 			assert(buffer);
 		}
 		return buffer + this->mapElemOffet;
@@ -456,15 +456,16 @@ public:
 	}
 
 	void Unmap() override {
-		if (!coherent) {
-			this->Bind(); //needed for glFlushMappedBufferRange()
-			glFlushMappedBufferRange(
-				this->target,
-				(this->allocIdx * this->byteSize) + this->mapElemOffet * sizeof(T),
-				this->mapElemCount * sizeof(T)
-			);
-			this->Unbind(); //needed for glFlushMappedBufferRange()
-		}
+		if (coherent)
+			return;
+
+		this->Bind(); //needed for glFlushMappedBufferRange()
+		glFlushMappedBufferRange(
+			this->target,
+			(this->allocIdx * this->byteSize) + this->mapElemOffet * sizeof(T),
+			this->mapElemCount * sizeof(T)
+		);
+		this->Unbind(); //needed for glFlushMappedBufferRange()
 	}
 
 	uint32_t BufferElemOffset() const override {
@@ -498,7 +499,7 @@ public:
 	void Init() override {
 		this->byteSize = this->GetAlignedByteSize(this->numElements * sizeof(T));
 		uint32_t bufferSize = AlignUp(numBuffers * this->byteSize, ALIGN_PINNED_MEMORY_SIZE);
-		ptrBase = reinterpret_cast<T*>(spring::AllocateAlignedMemory(bufferSize, ALIGN_PINNED_MEMORY_SIZE));
+		ptrBase = reinterpret_cast<T*>(recoil::aligned_alloc(ALIGN_PINNED_MEMORY_SIZE, bufferSize));
 
 		glGenBuffers(1, &this->id);
 
@@ -520,7 +521,7 @@ public:
 		glFinish();
 
 		this->DeleteBuffer();
-		spring::FreeAlignedMemory(ptrBase);
+		recoil::aligned_free(ptrBase);
 		ptrBase = nullptr;
 	}
 	IStreamBufferConcept::Types GetBufferImplementation() const override { return IStreamBufferConcept::Types::SB_PINNEDMEMAMD; }

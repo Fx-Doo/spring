@@ -1,5 +1,6 @@
 /* This file is part of the Spring engine (GPL v2 or later), see LICENSE.html */
 
+#include <cinttypes>
 #include <cfloat>
 #include <functional>
 
@@ -172,11 +173,12 @@ void CPreGame::AsyncExecute(CPreGame::AsyncExecFuncType execFunc, const std::str
 {
 	pendingTask = std::async(std::launch::async,
 		[execFunc, argument/*copy the argument explicitly*/, this]() {
-			const auto InitStreflopAndExecute = [execFunc, argument/*copy the argument explicitly*/, this]() {
+			const auto InitStuffAndExecute = [execFunc, argument/*copy the argument explicitly*/, this]() {
+				Threading::SetThreadName("pregame");
 				streflop::streflop_init<streflop::Simple>();
 				std::invoke(execFunc, this, argument);
 			};
-			std::invoke(InitStreflopAndExecute);
+			std::invoke(InitStuffAndExecute);
 		}
 	);
 }
@@ -185,7 +187,6 @@ bool CPreGame::Draw()
 {
 #ifndef HEADLESS
 	RECOIL_DETAILED_TRACY_ZONE;
-	spring_msecs(10).sleep(true); // 100 fps
 
 	ClearScreen();
 
@@ -323,8 +324,10 @@ void CPreGame::StartServer(const std::string& setupscript)
 		sha512::dump_digest(mapChecksum, mapChecksumHex);
 		sha512::dump_digest(modChecksum, modChecksumHex);
 
+		archiveScanner->WriteCache(); // write the cache, useful in case the game loading crashes afterwards
+
 		LOG("[PreGame::%s]\n\tmod-checksum=%s\n\tmap-checksum=%s", __func__, modChecksumHex.data(), mapChecksumHex.data());
-		LOG("[PreGame::%s] Game/Map archives checksum acquisition took = %ld microseconds", __func__, (spring_gettime() - connectTimer).toMilliSecsi());
+		LOG("[PreGame::%s] Game/Map archives checksum acquisition took = %" PRId64 " microseconds", __func__, (spring_gettime() - connectTimer).toMilliSecsi());
 
 		archiveScanner->WriteCache();
 	}

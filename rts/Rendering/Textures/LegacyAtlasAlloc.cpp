@@ -81,7 +81,7 @@ bool CLegacyAtlasAlloc::Allocate()
 	std::list<int2> nextSub;
 	std::list<int2> thisSub;
 
-	int padding = 1 << GetNumTexLevels();
+	int padding = GetPadding();
 
 	for (int a = 0; a < static_cast<int>(memtextures.size()); ++a) {
 		SAtlasEntry* curtex = memtextures[a];
@@ -118,7 +118,7 @@ bool CLegacyAtlasAlloc::Allocate()
 				thisSub.clear();
 				continue;
 			}
-			if (thisSub.front().y + curtex->size.y > max.y) {
+			if (thisSub.front().y + curtex->size.y + padding > max.y) {
 				thisSub.pop_front();
 				continue;
 			}
@@ -150,7 +150,7 @@ bool CLegacyAtlasAlloc::Allocate()
 		if (recalc) {
 			// reset all existing texcoords
 			for (auto it = memtextures.begin(); it != memtextures.end(); ++it) {
-				(*it)->texCoords = float4();
+				(*it)->texCoords = AtlasedTexture();
 			}
 			recalc = false;
 			a = -1;
@@ -159,6 +159,7 @@ bool CLegacyAtlasAlloc::Allocate()
 	}
 
 	atlasSize = max;
+	SizeRoundUp();
 
 	return success;
 }
@@ -167,7 +168,12 @@ int CLegacyAtlasAlloc::GetNumTexLevels() const
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	return std::min(
-		std::bit_width(static_cast<uint32_t>(GetMinDim())),
+		GetReqNumTexLevels(),
 		numLevels
 	);
+}
+
+int CLegacyAtlasAlloc::GetReqNumTexLevels() const
+{
+	return std::bit_width(static_cast<uint32_t>(GetMinDim()));
 }

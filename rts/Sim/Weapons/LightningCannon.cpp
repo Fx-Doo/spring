@@ -28,6 +28,18 @@ CLightningCannon::CLightningCannon(CUnit* owner, const WeaponDef* def): CWeapon(
 }
 
 
+bool CLightningCannon::TestRange(const float3& tgtPos, const SWeaponTarget& trg) const
+{
+	float3 aimDir = (tgtPos - aimFromPos);
+	const float targetDist = aimDir.LengthNormalize();
+
+	if (const auto shapedRange = GetShapedWeaponRange(aimDir, range); targetDist > shapedRange)
+		return false;
+
+	// NOTE: mainDir is in unit-space
+	return (CheckTargetAngleConstraint(aimDir, owner->GetObjectSpaceVec(mainDir)));
+}
+
 void CLightningCannon::FireImpl(const bool scriptCall)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -39,9 +51,12 @@ void CLightningCannon::FireImpl(const bool scriptCall)
 
 	CUnit* hitUnit = nullptr;
 	CFeature* hitFeature = nullptr;
+	CPlasmaRepulser* hitShield = nullptr;
 	CollisionQuery hitColQuery;
 
-	float boltLength = TraceRay::TraceRay(curPos, curDir, range, collisionFlags, owner, hitUnit, hitFeature, &hitColQuery);
+	const auto shapedRange = GetShapedWeaponRange(curDir, range);
+
+	float boltLength = TraceRay::TraceRay(curPos, curDir, shapedRange, collisionFlags, owner, hitUnit, hitFeature, &hitColQuery);
 
 	if (!weaponDef->waterweapon) {
 		// terminate bolt at water surface if necessary
@@ -54,12 +69,13 @@ void CLightningCannon::FireImpl(const bool scriptCall)
 
 	static std::vector<TraceRay::SShieldDist> hitShields;
 	hitShields.clear();
-	TraceRay::TraceRayShields(this, curPos, curDir, range, hitShields);
+	TraceRay::TraceRayShields(this, curPos, curDir, shapedRange, hitShields);
 	for (const TraceRay::SShieldDist& sd: hitShields) {
 		if (sd.dist < boltLength && sd.rep->IncomingBeam(this, curPos, curPos + (curDir * sd.dist), 1.0f)) {
 			boltLength = sd.dist;
 			hitUnit = nullptr;
 			hitFeature = nullptr;
+			hitShield = sd.rep;
 			break;
 		}
 	}
@@ -67,6 +83,14 @@ void CLightningCannon::FireImpl(const bool scriptCall)
 	if (hitUnit != nullptr)
 		hitUnit->SetLastHitPiece(hitColQuery.GetHitPiece(), gs->frameNum);
 
+	assert(1 * (!!hitUnit) + 1 * (!!hitFeature) + 1 * (!!hitShield) <= 1);
+
+	ProjectileParams pparams = GetProjectileParams();
+	pparams.pos = curPos;
+	pparams.end = curPos + curDir * (boltLength + 10.0f);
+	pparams.ttl = weaponDef->beamLaserTTL;
+
+	auto projID = WeaponProjectileFactory::LoadProjectile(pparams);
 
 	const DamageArray& damageArray = damages->GetDynamicDamages(weaponMuzzlePos, currentTargetPos);
 	const CExplosionParams params = {
@@ -75,8 +99,7 @@ void CLightningCannon::FireImpl(const bool scriptCall)
 		.damages              = damageArray,
 		.weaponDef            = weaponDef,
 		.owner                = owner,
-		.hitUnit              = hitUnit,
-		.hitFeature           = hitFeature,
+		.hitObject            = ExplosionHitObject(hitUnit, hitFeature, hitShield),
 		.craterAreaOfEffect   = damages->craterAreaOfEffect,
 		.damageAreaOfEffect   = damages->damageAreaOfEffect,
 		.edgeEffectiveness    = damages->edgeEffectiveness,
@@ -86,16 +109,9 @@ void CLightningCannon::FireImpl(const bool scriptCall)
 		.impactOnly           = weaponDef->impactOnly,
 		.ignoreOwner          = weaponDef->noExplode || weaponDef->noSelfDamage,
 		.damageGround         = false,
-		.projectileID         = static_cast<uint32_t>(-1u)
+		.projectileID         = projID
 	};
 
 	helper->Explosion(params);
-
-	ProjectileParams pparams = GetProjectileParams();
-	pparams.pos = curPos;
-	pparams.end = curPos + curDir * (boltLength + 10.0f);
-	pparams.ttl = weaponDef->beamLaserTTL;
-
-	WeaponProjectileFactory::LoadProjectile(pparams);
 }
 

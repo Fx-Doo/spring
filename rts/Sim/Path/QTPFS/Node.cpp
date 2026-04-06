@@ -609,13 +609,11 @@ bool QTPFS::QTNode::UpdateMoveCost(
 		nl.IncreaseOpenNodeCounter();
 	}
 
-	// Impassable squares don't impact search performance, but the larger they are the bigger the
-	// impact on updating. For example, sea units will often have large impassable areas for the
-	// land and we'll be recalculating across these larger areas every time those areas are damaged
-	// despite it not changing the impassability as far as ships are concerned. So make these areas
-	// as small as possible (i.e. same size as the damage quads) to minimize update performance
-	// impact.
-	needSplit |= (AllSquaresImpassable() && xsize() > 16); // TODO: magic number for size of damage quads
+	// For performance reasons, the maximum node size should match the damage size because mutliple damaged regions
+	// that doesn't result in a subdivision will cause the entire node to be re-evaluated over several frames. The
+	// larger the node, the larger the performance impact. This often occurs for impassable terrain or hard terrain
+	// such as metal.
+	needSplit |= (xsize() > QTPFS_MAP_DAMAGE_SIZE);
 
 	wantSplit &= (xsize() > 16); // try not to split below 16 if possible.
 	wantSplit &= !(nl.UseShortestPath());
@@ -625,32 +623,37 @@ bool QTPFS::QTNode::UpdateMoveCost(
 
 
 bool QTPFS::QTNode::UpdateExitOnly(NodeLayer& nl, bool& needSplit) {
-	bool exitOnlyStatePresent[2] = {false, false};
+    ZoneScoped;
 
-	auto checkRangeForSplit = [this, &nl, &exitOnlyStatePresent]() {
-		MoveDef *md = moveDefHandler.GetMoveDefByPathType(nl.GetNodelayer());
+	bool hasExitOnly = false;
+	auto checkRangeForSplit = [this, &nl, &hasExitOnly]() -> bool {
+		const auto cacheView = nl.GetExitOnlyCacheView(xmin(), zmin());
+		bool hasNormal = false;
 
-		for (int z = zmin(); z < zmax(); ++z) {
-			for (int x = xmin(); x < xmax(); ++x) {
-				bool isExitOnlyZone = md->IsInExitOnly(x, z);
-				exitOnlyStatePresent[isExitOnlyZone] = true;
+		uint32_t xWidth = xsize();
+		uint32_t zWidth = zsize();
+		for (uint32_t z = 0; z < zWidth; ++z) {
+			for (uint32_t x = 0; x < xWidth; ++x) {
+				const uint32_t i = (cacheView.zOffset + z) * cacheView.stride
+				                 + (cacheView.xOffset + x);
 
-				// if the other state is also true, then multiple exitOnly states are present and a split is
-				// needed.
-				if (exitOnlyStatePresent[!isExitOnlyZone] == true)
-					return true;
+				if (cacheView.data[i].IsExitOnly())
+					hasExitOnly = true;
+				else
+					hasNormal = true;
+
+				if (hasNormal && hasExitOnly) return true;
 			}
 		}
 		return false;
 	};
+
 	needSplit = checkRangeForSplit();
 
-	if (!needSplit) {
-		bool isExitOnlyZone = exitOnlyStatePresent[true];
-		index |= uint32_t(isExitOnlyZone)<<EXIT_ONLY_BIT_OFFSET;
-	}
+    if (hasExitOnly)
+        index |= (1u << EXIT_ONLY_BIT_OFFSET);
 
-	return needSplit;
+    return needSplit;
 }
 
 // get the maximum number of neighbors this node
@@ -672,7 +675,7 @@ unsigned int QTPFS::QTNode::GetMaxNumNeighbors() const {
 
 // THIS FUNCTION IS NOT USED
 // Loading the cache seems to be slower than regenerating the data live at the moment.
-void QTPFS::QTNode::Serialize(std::fstream& fStream, NodeLayer& nodeLayer, unsigned int* streamSize, unsigned int depth, bool readMode) {
+void QTPFS::QTNode::Serialize(nowide::fstream& fStream, NodeLayer& nodeLayer, unsigned int* streamSize, unsigned int depth, bool readMode) {
 	RECOIL_DETAILED_TRACY_ZONE;
 	// overwritten when de-serializing
 	unsigned int numChildren = QTNODE_CHILD_COUNT * (1 - int(IsLeaf()));

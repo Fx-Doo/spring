@@ -4,14 +4,16 @@
 #define _THREADPOOL_H
 
 #ifndef THREADPOOL
-#include  <functional>
+#include <functional>
+#include <future>
 #include "System/Threading/SpringThreading.h"
 
 namespace ThreadPool {
 	template<class F, class... Args>
-	static inline void Enqueue(F&& f, Args&&... args)
+	static auto Enqueue(F&& f, Args&&... args)
+	-> std::shared_future<std::invoke_result_t<F, Args...>>
 	{
-		f(args ...);
+		return std::shared_future(std::async(std::launch::deferred, std::forward<F>(f), std::forward<Args>(args)...));
 	}
 
 	static inline void AddExtJob(spring::thread&& t) { t.join(); }
@@ -22,6 +24,8 @@ namespace ThreadPool {
 	static inline void SetDefaultThreadCount() {}
 	static inline void SetThreadCount(int num) {}
 	static inline int GetThreadNum() { return 0; }
+	static inline int IsInMultiThreadedSection() { return false; }
+	static inline void SetInMultiThreadedSection(const bool ignored) {}
 	static inline int GetMaxThreads() { return 1; }
 	static inline int GetNumThreads() { return 1; }
 	static inline void NotifyWorkerThreads(bool force, bool async) {}
@@ -45,11 +49,31 @@ static inline void for_mt(int start, int end, F&& f)
 }
 
 template <typename F>
+static inline void for_mt_background(int start, int end, int step, F&& f)
+{
+	for (int i = start; i < end; i += step) {
+		f(i);
+	}
+}
+
+template <typename F>
+static inline void for_mt_background(int start, int end, F&& f)
+{
+	for_mt(start, end, 1, std::move(f));
+}
+
+template <typename F>
+static inline void wait_for_mt_background(F taskGroup)
+{
+	return;
+}
+
+
+template <typename F>
 static inline void for_mt_chunk(int b, int e, F&& f, int chunkSize = 0)
 {
 	for_mt(b, e, f);
 }
-
 
 static inline void parallel(const std::function<void()>&& f)
 {
@@ -64,7 +88,6 @@ static inline auto parallel_reduce(F&& f, G&& g) -> std::invoke_result_t<F>
 
 #else
 
-#include "System/TimeProfiler.h"
 #include "System/Platform/Threading.h"
 #include "System/Threading/SpringThreading.h"
 
@@ -79,6 +102,8 @@ static inline auto parallel_reduce(F&& f, G&& g) -> std::invoke_result_t<F>
 #ifdef UNITSYNC
 	#undef SCOPED_MT_TIMER
 	#define SCOPED_MT_TIMER(x)
+#else
+	#include "System/TimeProfiler.h"
 #endif
 
 class ITaskGroup;
@@ -104,17 +129,26 @@ namespace ThreadPool {
 	void SetDefaultThreadCount();
 	void SetThreadCount(int num);
 	int GetThreadNum();
+	int IsInMultiThreadedSection();
+	void SetInMultiThreadedSection(const bool value);
 	bool HasThreads();
 	int GetMaxThreads();
 	int GetNumThreads();
 	void NotifyWorkerThreads(bool force, bool async);
 
-	extern bool inMultiThreadedSection;
-
 	static constexpr int MAX_THREADS = 32;
 }
 
 
+struct MultithreadedSection {
+	MultithreadedSection() {
+		ThreadPool::SetInMultiThreadedSection(true);
+	}
+
+	~MultithreadedSection() {
+		ThreadPool::SetInMultiThreadedSection(false);
+	}
+};
 
 
 class ITaskGroup
@@ -130,13 +164,15 @@ public:
 
 	virtual bool IsAsyncTask() const { return false; }
 	virtual bool IsSliceTask() const { return false; }
-	virtual bool ExecuteStep() = 0;
+	virtual bool ExecuteStep(int tid) = 0;
 	virtual bool SelfDelete() const { return false; }
+	virtual bool IsHighPriority() const { return true; }
+	virtual bool ShouldReschedule() const { return false; }
 
 	uint64_t ExecuteLoop(int tid, bool wffCall) {
 		const spring_time t0 = spring_now();
 
-		while (ExecuteStep());
+		while (ExecuteStep(tid));
 
 		const spring_time t1 = spring_now();
 		const spring_time dt = t1 - t0;
@@ -233,7 +269,7 @@ public:
 
 	bool IsAsyncTask() const override { return true; }
 	bool SelfDelete() const override { return (selfDelete.load()); }
-	bool ExecuteStep() override {
+	bool ExecuteStep(int tid) override {
 		// note: *never* called from WaitForFinished
 		(*task)();
 		remainingTasks -= 1;
@@ -251,6 +287,38 @@ public:
 	std::shared_future<return_type> result;
 };
 
+
+template<class F, class... Args>
+class SyncTask: public ITaskGroup
+{
+public:
+	using return_type = std::invoke_result_t<F, Args...>;
+
+	SyncTask(F f, Args... args) : selfDelete(true) {
+		task = std::make_shared<std::packaged_task<return_type()>>(std::bind(f, std::forward<Args>(args)...));
+		result = std::move(task->get_future());
+
+		remainingTasks += 1;
+	}
+
+	bool SelfDelete() const override { return (selfDelete.load()); }
+	bool ExecuteStep(int tid) override {
+		// note: *never* called from WaitForFinished
+		(*task)();
+		remainingTasks -= 1;
+		return false;
+	}
+
+	// FIXME: rethrow exceptions some time
+	std::shared_future<return_type> GetFuture() { assert(result.valid()); return std::move(result); }
+
+public:
+	// if true, we are not managed by a shared_ptr
+	std::atomic<bool> selfDelete;
+
+	std::shared_ptr<std::packaged_task<return_type()>> task;
+	std::shared_future<return_type> result;
+};
 
 
 template<class F, typename R = int, class... Args>
@@ -273,7 +341,7 @@ public:
 	}
 
 
-	bool ExecuteStep() override
+	bool ExecuteStep(int tid) override
 	{
 		const int pos = curtask.fetch_add(1, std::memory_order_relaxed);
 
@@ -314,7 +382,7 @@ public:
 		remainingTasks.fetch_add(1, std::memory_order_release);
 	}
 
-	bool ExecuteStep() override
+	bool ExecuteStep(int tid) override
 	{
 		const int pos = curtask.fetch_add(1, std::memory_order_relaxed);
 
@@ -347,7 +415,7 @@ public:
 		remainingTasks.fetch_add(1, std::memory_order_release);
 	}
 
-	bool ExecuteStep() override
+	bool ExecuteStep(int tid) override
 	{
 		const int pos = curtask.fetch_add(1, std::memory_order_relaxed);
 
@@ -402,13 +470,13 @@ public:
 		uniqueTasks[threadNum] = [=](){ (*task)(); };
 	}
 
-	bool ExecuteStep() override
+	bool ExecuteStep(int tid) override
 	{
 		auto& func = uniqueTasks[ThreadPool::GetThreadNum()];
 
 		// does nothing when num=0 except return false (no change to remainingTasks)
 		if (func == nullptr)
-			return TTaskGroup<F, return_type, Args...>::ExecuteStep();
+			return TTaskGroup<F, return_type, Args...>::ExecuteStep(tid);
 
 		// no need to make threadsafe; each thread has its own container
 		func();
@@ -465,7 +533,7 @@ public:
 	//   WaitForFinished and 2) the pool contains at most two threads
 	//   (three or more will inevitably cause a hang, same conditions
 	//   as TParallelTaskGroup)
-	bool ExecuteStep() override
+	bool ExecuteStep(int tid) override
 	{
 		auto& ut = uniqueTasks[ThreadPool::GetThreadNum()];
 
@@ -516,7 +584,7 @@ public:
 		}
 	}
 
-	bool ExecuteStep() override
+	bool ExecuteStep(int tid) override
 	{
 		bool isFinished = true;
 
@@ -572,7 +640,7 @@ public:
 	}
 
 
-	bool ExecuteStep() override
+	bool ExecuteStep(int tid) override
 	{
 		bool isFinished = true;
 
@@ -616,7 +684,7 @@ public:
 	}
 
 	bool IsSliceTask() const override { return true; }
-	bool ExecuteStep() override
+	bool ExecuteStep(int tid) override
 	{
 		const int i = from + (step * ctr.fetch_add(1, std::memory_order_relaxed));
 
@@ -629,7 +697,7 @@ public:
 		return false;
 	}
 
-private:
+protected:
 	std::atomic<int> ctr;
 	std::function<void(const int)> func;
 
@@ -637,6 +705,31 @@ private:
 	int to;
 	int step;
 };
+
+template<typename F>
+class ForBackgroundTaskGroup : public ForTaskGroup<F>
+{
+public:
+	ForBackgroundTaskGroup(bool pooled) : ForTaskGroup<F>(pooled) {}
+	bool IsHighPriority() const override { return false; }
+	bool ShouldReschedule() const override { return !this->IsFinished(); }
+
+	bool ExecuteStep(int tid) override
+	{
+		const int i = this->from + (this->step * this->ctr.fetch_add(1, std::memory_order_relaxed));
+
+		if (i < this->to) {
+			this->func(i);
+			this->remainingTasks -= 1;
+			return (tid == 0); // If the main thread is doing this, then the activity is no longer a background task.
+		}
+
+		// Only carries a single step. It should be rescheduled if needed. This is necessary to allow high priority
+		// items to be processed in preference.
+		return false;
+	}
+};
+
 #endif
 
 
@@ -673,7 +766,7 @@ struct TaskPool {
 template <typename F>
 static inline void for_mt(int start, int end, int step, F&& f)
 {
-	ThreadPool::inMultiThreadedSection = true;
+	MultithreadedSection mtSection;
 
 	if (!ThreadPool::HasThreads() || ((end - start) < step)) {
 		for (int i = start; i < end; i += step) {
@@ -705,9 +798,50 @@ static inline void for_mt(int start, int end, int step, F&& f)
 		// make calling thread also run ExecuteLoop
 		ThreadPool::WaitForFinished(taskGroup);
 	}
-
-	ThreadPool::inMultiThreadedSection = false;
 }
+
+// Schedule Synced, background task. This is a task that will break between each execution step to let other sync tasks
+// take priority. The purpose for this task is to run while other systems are, using any available worker threads. Only
+// tasks that can run in complete isolation from the rest of the simulation can use this. Only QTPFS Path Searching
+// meets this criteria. If we need multiple systems to make use of this then we may need to revisit the rescheduling
+// logic because the background tasks will likely interleave their execution steps, which won't be ideal for
+// performance.
+// Background synced tasks will take priority over unsynced threading tasks.
+template <typename F>
+static inline auto for_mt_background(int start, int end, int step, F&& f)
+{
+	// mt section delcaration is not needed here because the main thread won't be working on the mt tasks here.
+
+	if (!ThreadPool::HasThreads() || ((end - start) < step)) {
+		for (int i = start; i < end; i += step) {
+			f(i);
+		}
+		typename TaskPool<ForBackgroundTaskGroup, F>::FuncTaskGroupPtr emptyPtr;
+		return emptyPtr;
+	}
+	else {
+		SCOPED_MT_TIMER("ThreadPool::AddTask");
+
+		// static, so TaskGroup's are recycled
+		static TaskPool<ForBackgroundTaskGroup, F> pool;
+		auto taskGroup = pool.GetTaskGroup();
+
+		taskGroup->Enqueue(start, end, step, f);
+		taskGroup->UpdateId();
+
+		assert(taskGroup->IsInJobQueue());
+
+		// store the group in all worker queues s.t. each executes a slice
+		for (size_t i = 1; i < ThreadPool::GetNumThreads(); ++i) {
+			taskGroup->wantedThread.store(i);
+			ThreadPool::PushTaskGroup(taskGroup);
+		}
+
+		// This will not wait for the task group to finish.
+		return taskGroup;
+	}
+}
+
 
 template <typename F>
 static inline void for_mt(int start, int end, F&& f)
@@ -716,8 +850,32 @@ static inline void for_mt(int start, int end, F&& f)
 }
 
 template <typename F>
+static inline auto for_mt_background(int start, int end, F&& f)
+{
+	return for_mt_background(start, end, 1, f);
+}
+
+
+template <typename F>
+static inline void wait_for_mt_background(F taskGroup)
+{
+	MultithreadedSection mtSection;
+
+	if (!ThreadPool::HasThreads())
+		return;
+
+	SCOPED_MT_TIMER("ThreadPool::AddTask");
+
+	// make calling thread also run ExecuteLoop
+	ThreadPool::WaitForFinished(taskGroup);
+}
+
+
+template <typename F>
 static inline void for_mt_chunk(int b, int e, F&& f, int minChunkSize = 1, int maxChunkSize = std::numeric_limits<int>::max())
 {
+	MultithreadedSection mtSection;
+
 	const int numElems = e - b;
 	if (numElems <= 0)
 		return;
@@ -747,6 +905,8 @@ static inline void for_mt_chunk(int b, int e, F&& f, int minChunkSize = 1, int m
 template <typename F>
 static inline void parallel(F&& f)
 {
+	MultithreadedSection mtSection;
+
 	if (!ThreadPool::HasThreads())
 		return f();
 
@@ -767,9 +927,11 @@ static inline void parallel(F&& f)
 }
 
 
-template<class F, class G>
+template<typename TaskType, class F, class G>
 static inline auto parallel_reduce(F&& f, G&& g) -> std::invoke_result_t<F>
 {
+	MultithreadedSection mtSection;
+
 	if (!ThreadPool::HasThreads())
 		return f();
 
@@ -778,18 +940,16 @@ static inline auto parallel_reduce(F&& f, G&& g) -> std::invoke_result_t<F>
 	using RetType = std::invoke_result_t<F>;
 	using FoldType = std::shared_future<RetType>;
 
-	// std::array<TaskType, ThreadPool::MAX_THREADS> tasks;
-	std::array<AsyncTask<F>*, ThreadPool::MAX_THREADS> tasks;
+	std::array<TaskType*, ThreadPool::MAX_THREADS> tasks;
 	std::array<FoldType, ThreadPool::MAX_THREADS> results;
 
 	// NOTE:
-	//   results become available in AsyncTask::ExecuteStep, and can allow
+	//   results become available in TaskType::ExecuteStep, and can allow
 	//   accumulate to return (followed by tasks going out of scope) before
 	//   ExecuteStep's themselves have returned --> premature task deletion
 	//   if shared_ptr were used (all tasks *must* have exited ExecuteLoop)
 	//
-	// tasks[0] = std::move(std::make_shared<AsyncTask<F>>(std::forward<F>(f)));
-	tasks[0] = new AsyncTask<F>(std::forward<F>(f));
+	tasks[0] = new TaskType(std::forward<F>(f));
 	results[0] = std::move(tasks[0]->GetFuture());
 
 	// first job in a reduction usually wants to run on the main thread
@@ -797,8 +957,7 @@ static inline auto parallel_reduce(F&& f, G&& g) -> std::invoke_result_t<F>
 
 	// need to push N individual tasks; see NOTE in TParallelTaskGroup
 	for (size_t i = 1, n = ThreadPool::GetNumThreads(); i < n; ++i) {
-		// tasks[i] = std::move(std::make_shared<AsyncTask<F>>(std::forward<F>(f)));
-		tasks[i] = new AsyncTask<F>(std::forward<F>(f));
+		tasks[i] = new TaskType(std::forward<F>(f));
 		results[i] = std::move(tasks[i]->GetFuture());
 
 		// tasks[i]->selfDelete.store(false);

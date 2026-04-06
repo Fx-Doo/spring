@@ -8,6 +8,7 @@
 #include "Game/GlobalUnsynced.h"
 #include "Map/Ground.h"
 #include "Map/MapInfo.h"
+#include "Rendering/Models/3DModel.hpp"
 #include "Rendering/Env/Particles/Classes/BubbleProjectile.h"
 #include "Rendering/Env/Particles/Classes/GeoThermSmokeProjectile.h"
 #include "Rendering/Env/Particles/Classes/SmokeProjectile.h"
@@ -58,6 +59,7 @@ CR_REG_METADATA(CFeature, (
 
 	CR_MEMBER(solidOnTop),
 	CR_MEMBER(transMatrix),
+
 	CR_POSTLOAD(PostLoad)
 ))
 
@@ -192,6 +194,7 @@ void CFeature::Initialize(const FeatureLoadParams& params)
 
 	// set position before mid-position
 	Move(((po == nullptr)? params.pos: po->pos).cClampInMap(), false);
+
 	// use base-class version, AddFeature() below
 	// will already insert us in the update-queue
 	CWorldObject::SetVelocity((po == nullptr)? params.speed: po->speed);
@@ -228,7 +231,6 @@ void CFeature::Initialize(const FeatureLoadParams& params)
 	UpdateMidAndAimPos();
 	UpdateTransformAndPhysState();
 
-
 	collisionVolume = def->collisionVolume;
 	selectionVolume = def->selectionVolume;
 
@@ -262,7 +264,7 @@ bool CFeature::AddBuildPower(CUnit* builder, float amount)
 
 	if (amount > 0.0f) {
 		// 'Repairing' previously-sucked features prior to resurrection
-		// This is reclaim-option independant - repairing features should always
+		// This is reclaim-option independent - repairing features should always
 		// be like other repairing - gradual and multi-unit
 		// Lots of this code is stolen from unit->AddBuildPower
 		//
@@ -334,13 +336,14 @@ bool CFeature::AddBuildPower(CUnit* builder, float amount)
 	const float reclaimLeftTemp = std::max(0.0f, reclaimLeft - step);
 	const float fractionReclaimed = oldReclaimLeft - reclaimLeftTemp;
 	const auto resourceFraction = (defResources * fractionReclaimed).cap_at(resources);
-	const float energyUseScaled = resourceFraction.metal * modInfo.reclaimFeatureEnergyCostFactor;
+	const auto resourceCost = resourceFraction.metal * modInfo.reclaimFeatureCostFactor;
 
 	SResourceOrder order;
 	order.quantum    = false;
 	order.overflow   = builder->harvestStorage.empty();
 	order.separate   = true;
-	order.use.energy = energyUseScaled;
+	order.use = resourceCost;
+	order.useIncomeMultiplier = false; // Dont apply income multiplier to reclaim
 
 	if (reclaimLeftTemp == 0.0f) {
 		// always give remaining resources at the end
@@ -422,21 +425,28 @@ void CFeature::DoDamage(
 	eventHandler.FeatureDamaged(this, attacker, baseDamage, weaponDefID, projectileID);
 
 	if (health <= 0.0f && def->destructable) {
-		FeatureLoadParams params = {nullptr, nullptr, featureDefHandler->GetFeatureDefByID(def->deathFeatureDefID), pos, speed, -1, team, -1, heading, buildFacing, 0, 0};
-		CFeature* deathFeature = featureHandler.CreateWreckage(params);
-
-		if (deathFeature != nullptr) {
-			// if a partially reclaimed corpse got blasted,
-			// ensure its wreck is not worth the full amount
-			// (which might be more than the amount remaining)
-			deathFeature->resources *= resources / defResources;
-		}
+		CreateWreck(0, 0);
 
 		featureHandler.DeleteFeature(this);
 		blockHeightChanges = false;
 	}
 }
 
+
+CFeature* CFeature::CreateWreck(int wreckLevel, int smokeTime)
+{
+	FeatureLoadParams params = {nullptr, nullptr, featureDefHandler->GetFeatureDefByID(def->deathFeatureDefID), pos, speed, -1, team, -1, heading, buildFacing, wreckLevel, smokeTime};
+	CFeature* deathFeature = featureHandler.CreateWreckage(params);
+
+	if (deathFeature != nullptr) {
+		// if a partially reclaimed corpse got blasted,
+		// ensure its wreck is not worth the full amount
+		// (which might be more than the amount remaining)
+		deathFeature->resources *= resources / defResources;
+	}
+
+	return deathFeature;
+}
 
 
 void CFeature::DependentDied(CObject *o)
@@ -452,6 +462,7 @@ void CFeature::DependentDied(CObject *o)
 void CFeature::SetVelocity(const float3& v)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
+
 	CWorldObject::SetVelocity(v * moveCtrl.velocityMask);
 	CWorldObject::SetSpeed(v * moveCtrl.velocityMask);
 
@@ -467,10 +478,12 @@ void CFeature::SetVelocity(const float3& v)
 void CFeature::ForcedMove(const float3& newPos)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
+
+	// shouldn't rely on preFrameTra.t here, as ForcedMove can be called multiple times a synced frame
+	// and we better convey each movement separately
+	const float3 oldPos = pos;
 	// remove from managers
 	quadField.RemoveFeature(this);
-
-	const float3 oldPos = pos;
 
 	UnBlock();
 	Move(newPos - pos, true);
@@ -495,6 +508,21 @@ void CFeature::ForcedSpin(const float3& newDir)
 	UpdateTransform(pos, true);
 }
 
+void CFeature::ForcedSpin(const float3& newFrontDir, const float3& newRightDir)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	// update local direction-vectors
+	CSolidObject::ForcedSpin(newFrontDir, newRightDir);
+	UpdateTransform(pos, true);
+}
+
+void CFeature::UpdateTransform(const float3& p, bool synced)
+{
+	transMatrix[synced] = std::move(ComposeMatrix(p));
+
+	if (synced)
+		CondUpdatePrevTransform();
+}
 
 void CFeature::UpdateTransformAndPhysState()
 {
@@ -560,6 +588,8 @@ bool CFeature::UpdateVelocity(
 bool CFeature::UpdatePosition()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
+
+	// can't rely on preFrameTra.t here, as it's getting updated with every change of the position on creationFrame
 	const float3 oldPos = pos;
 	// const float4 oldSpd = speed;
 
@@ -594,7 +624,7 @@ bool CFeature::UpdatePosition()
 	Block(); // does the check if wanted itself
 
 	// use an exact comparison for the y-component (gravity is small)
-	if (!pos.equals(oldPos, float3(float3::cmp_eps(), 0.0f, float3::cmp_eps()))) {
+	if (!pos.equals(oldPos, float3(float3::cmp_eps(), 0.0f, float3::cmp_eps())) || gs->frameNum == creationFrame) {
 		eventHandler.FeatureMoved(this, oldPos);
 		return true;
 	}
@@ -604,9 +634,8 @@ bool CFeature::UpdatePosition()
 	// nullify the vector to prevent visual extrapolation jitter
 	SetVelocityAndSpeed(mix({ZeroVector, 0.0f}, speed * moveCtrl.velocityMask, moveCtrl.enabled));
 
-	return (moveCtrl.enabled);
+	return moveCtrl.enabled;
 }
-
 
 bool CFeature::Update()
 {

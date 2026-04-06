@@ -29,14 +29,21 @@ CR_REG_METADATA(CExpGenSpawnable, (
 	CR_MEMBER(rotVal),
 	CR_MEMBER(rotVel),
 	CR_MEMBER(createFrame),
+	CR_MEMBER(animProgress1),
+	CR_MEMBER(animProgress2),
+	CR_MEMBER(animProgress3),
+	CR_MEMBER(animProgress4),
 	CR_MEMBER_BEGINFLAG(CM_Config),
 		CR_MEMBER(rotParams),
-		CR_MEMBER(animParams),
-	CR_MEMBER_ENDFLAG(CM_Config),
-	CR_IGNORED(animProgress)
+		CR_FAKE(animParams),
+		CR_MEMBER(animParams1),
+		CR_MEMBER(animParams2),
+		CR_MEMBER(animParams3),
+		CR_MEMBER(animParams4),
+	CR_MEMBER_ENDFLAG(CM_Config)
 ))
 
-std::array<CExpGenSpawnable::SpawnableTuple, 14> CExpGenSpawnable::spawnables = {};
+decltype(CExpGenSpawnable::spawnables) CExpGenSpawnable::spawnables = {};
 
 CExpGenSpawnable::CExpGenSpawnable(const float3& pos, const float3& spd)
 	: CWorldObject(pos, spd)
@@ -67,7 +74,7 @@ CExpGenSpawnable::~CExpGenSpawnable()
 void CExpGenSpawnable::Init(const CUnit* owner, const float3& offset)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	createFrame = gs->frameNum;
+	createFrame = std::max(gs->frameNum, 0);
 	rotParams *= float3(math::DEG_TO_RAD / GAME_SPEED, math::DEG_TO_RAD / (GAME_SPEED * GAME_SPEED), math::DEG_TO_RAD);
 
 	UpdateRotation();
@@ -82,12 +89,7 @@ void CExpGenSpawnable::UpdateRotation()
 	rotVal = rotParams.z + rotVel      * t;
 }
 
-void CExpGenSpawnable::UpdateAnimParams()
-{
-	UpdateAnimParamsImpl(animParams, animProgress);
-}
-
-void CExpGenSpawnable::UpdateAnimParamsImpl(const float3& ap, float& p)
+void CExpGenSpawnable::UpdateAnimParamsImpl(const float3& ap, float& p) const
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	if (static_cast<int>(ap.x) <= 1 && static_cast<int>(ap.y) <= 1) {
@@ -121,13 +123,17 @@ bool CExpGenSpawnable::GetMemberInfo(SExpGenSpawnableMemberInfo& memberInfo)
 		spring::LiteHash("alwaysvisible",  sizeof("alwaysvisible") - 1, 0),
 	};
 
-	CHECK_MEMBER_INFO_FLOAT3_HASH(CExpGenSpawnable, pos          , memberHashes[0])
-	CHECK_MEMBER_INFO_FLOAT4_HASH(CExpGenSpawnable, speed        , memberHashes[1])
-	CHECK_MEMBER_INFO_BOOL_HASH  (CExpGenSpawnable, useAirLos    , memberHashes[2])
-	CHECK_MEMBER_INFO_BOOL_HASH  (CExpGenSpawnable, alwaysVisible, memberHashes[3])
+	CHECK_MEMBER_INFO_FLOAT3_HASH(CExpGenSpawnable, pos          , memberHashes[0]);
+	CHECK_MEMBER_INFO_FLOAT4_HASH(CExpGenSpawnable, speed        , memberHashes[1]);
+	CHECK_MEMBER_INFO_BOOL_HASH  (CExpGenSpawnable, useAirLos    , memberHashes[2]);
+	CHECK_MEMBER_INFO_BOOL_HASH  (CExpGenSpawnable, alwaysVisible, memberHashes[3]);
 
-	CHECK_MEMBER_INFO_FLOAT3(CExpGenSpawnable, rotParams)
-	CHECK_MEMBER_INFO_FLOAT3(CExpGenSpawnable, animParams)
+	CHECK_MEMBER_INFO_FLOAT3(CExpGenSpawnable, rotParams);
+
+	CHECK_MEMBER_INFO_FLOAT3(CExpGenSpawnable, animParams1);
+	CHECK_MEMBER_INFO_FLOAT3(CExpGenSpawnable, animParams2);
+	CHECK_MEMBER_INFO_FLOAT3(CExpGenSpawnable, animParams3);
+	CHECK_MEMBER_INFO_FLOAT3(CExpGenSpawnable, animParams4);
 
 	return false;
 }
@@ -162,7 +168,6 @@ std::make_tuple( \
 	Func<CHeatCloudProjectile  >, \
 	Func<CNanoProjectile       >, \
 	Func<CSimpleParticleSystem >, \
-	Func<CSphereParticleSpawner>, \
 	Func<CSmokeProjectile      >, \
 	Func<CSmokeProjectile2     >, \
 	Func<CSpherePartSpawner    >, \
@@ -220,12 +225,7 @@ CExpGenSpawnable* CExpGenSpawnable::CreateSpawnable(int spawnableID)
 	return std::get<2>(spawnables[spawnableID])();
 }
 
-void CExpGenSpawnable::AddEffectsQuad(const VA_TYPE_TC& tl, const VA_TYPE_TC& tr, const VA_TYPE_TC& br, const VA_TYPE_TC& bl) const
-{
-	AddEffectsQuadImpl(tl, tr, br, bl, animParams, animProgress);
-}
-
-void CExpGenSpawnable::AddEffectsQuadImpl(const VA_TYPE_TC& tl, const VA_TYPE_TC& tr, const VA_TYPE_TC& br, const VA_TYPE_TC& bl, const float3& ap, const float& p)
+void CExpGenSpawnable::AddEffectsQuadImpl(uint32_t pageNum, const VA_TYPE_TC& tl, const VA_TYPE_TC& tr, const VA_TYPE_TC& br, const VA_TYPE_TC& bl, const float3& ap, const float& p)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	float minS = std::numeric_limits<float>::max()   ; float minT = std::numeric_limits<float>::max()   ;
@@ -241,18 +241,18 @@ void CExpGenSpawnable::AddEffectsQuadImpl(const VA_TYPE_TC& tl, const VA_TYPE_TC
 
 	const auto uvInfo = float4{ minS, minT, maxS - minS, maxT - minT };
 	const auto animInfo = float3{ ap.x, ap.y, p };
-	constexpr float layer = 0.0f; //for future texture arrays
+	const auto pn = static_cast<float>(pageNum);
 
 	//pos, uvw, uvmm, col
 	rb.AddQuadTriangles(
-		{ tl.pos, float3{ tl.s, tl.t, layer }, uvInfo, animInfo, tl.c },
-		{ tr.pos, float3{ tr.s, tr.t, layer }, uvInfo, animInfo, tr.c },
-		{ br.pos, float3{ br.s, br.t, layer }, uvInfo, animInfo, br.c },
-		{ bl.pos, float3{ bl.s, bl.t, layer }, uvInfo, animInfo, bl.c }
+		{ tl.pos, float3{ tl.s, tl.t, pn }, uvInfo, animInfo, tl.c },
+		{ tr.pos, float3{ tr.s, tr.t, pn }, uvInfo, animInfo, tr.c },
+		{ br.pos, float3{ br.s, br.t, pn }, uvInfo, animInfo, br.c },
+		{ bl.pos, float3{ bl.s, bl.t, pn }, uvInfo, animInfo, bl.c }
 	);
 }
 
-void CExpGenSpawnable::AddEffectsQuadImpl(const VA_TYPE_TC& tl, const VA_TYPE_TC& tr, const VA_TYPE_TC& br, const VA_TYPE_TC& bl)
+void CExpGenSpawnable::AddEffectsQuadImpl(uint32_t pageNum, const VA_TYPE_TC& tl, const VA_TYPE_TC& tr, const VA_TYPE_TC& br, const VA_TYPE_TC& bl)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	float minS = std::numeric_limits<float>::max()   ; float minT = std::numeric_limits<float>::max()   ;
@@ -268,13 +268,13 @@ void CExpGenSpawnable::AddEffectsQuadImpl(const VA_TYPE_TC& tl, const VA_TYPE_TC
 
 	const auto uvInfo = float4{ minS, minT, maxS - minS, maxT - minT };
 	static constexpr auto animInfo = float3{ 1.0f, 1.0f , 0.0f };
-	constexpr float layer = 0.0f; //for future texture arrays
+	const auto pn = static_cast<float>(pageNum);
 
 	//pos, uvw, uvmm, col
 	rb.AddQuadTriangles(
-		{ tl.pos, float3{ tl.s, tl.t, layer }, uvInfo, animInfo, tl.c },
-		{ tr.pos, float3{ tr.s, tr.t, layer }, uvInfo, animInfo, tr.c },
-		{ br.pos, float3{ br.s, br.t, layer }, uvInfo, animInfo, br.c },
-		{ bl.pos, float3{ bl.s, bl.t, layer }, uvInfo, animInfo, bl.c }
+		{ tl.pos, float3{ tl.s, tl.t, pn }, uvInfo, animInfo, tl.c },
+		{ tr.pos, float3{ tr.s, tr.t, pn }, uvInfo, animInfo, tr.c },
+		{ br.pos, float3{ br.s, br.t, pn }, uvInfo, animInfo, br.c },
+		{ bl.pos, float3{ bl.s, bl.t, pn }, uvInfo, animInfo, bl.c }
 	);
 }

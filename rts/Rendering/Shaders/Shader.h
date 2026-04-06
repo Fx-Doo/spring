@@ -96,7 +96,7 @@ namespace Shader {
 			std::string log;
 		};
 
-		/// @brief Returns a GLSL shader object in an unqiue pointer that auto deletes that instance.
+		/// @brief Returns a GLSL shader object in an unique pointer that auto deletes that instance.
 		///        Quote of GL docs: If a shader object is deleted while it is attached to a program object,
 		///        it will be flagged for deletion, and deletion will not occur until glDetachShader is called
 		///        to detach it from all program objects to which it is attached.
@@ -137,6 +137,7 @@ namespace Shader {
 		bool LoadFromLua(const std::string& filename);
 
 		virtual void BindAttribLocation(const std::string& name, uint32_t index) {}
+		virtual void BindOutputLocation(const std::string& name, uint32_t index) {}
 		template<typename VAT>
 		void BindAttribLocations();
 
@@ -249,6 +250,7 @@ namespace Shader {
 		/// interface to auto-bind textures with the shader
 		void AddTextureBinding(const int texUnit, const std::string& luaTexName);
 		void BindTextures() const;
+		void UnbindTextures() const;
 
 	protected:
 		/// internal
@@ -320,6 +322,7 @@ namespace Shader {
 		UniformStates uniformStates;
 		spring::unsynced_map<int, LuaMatTexture> luaTextures;
 		spring::unsynced_map<std::string, int> attribLocations;
+		spring::unsynced_map<std::string, int> outputLocations;
 	};
 
 
@@ -418,6 +421,7 @@ namespace Shader {
 		~GLSLProgramObject() override { Release(); }
 
 		void BindAttribLocation(const std::string& name, uint32_t index) override;
+		void BindOutputLocation(const std::string& name, uint32_t index) override;
 
 		void Enable() override;
 		void Disable() override { DisableRaw(); }

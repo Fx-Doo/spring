@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "Rendering/GL/myGL.h"
+#include "Rendering/Textures/AtlasedTexture.hpp"
 #include "Rendering/Textures/TAPalette.h"
 #include "System/float4.h"
 #include "System/UnorderedMap.hpp"
@@ -16,7 +17,7 @@ struct TexFile;
 class C3DOTextureHandler
 {
 public:
-	typedef float4 UnitTexture;
+	using UnitTexture = float4;
 
 	void Init();
 	void Kill();
@@ -30,6 +31,8 @@ public:
 	unsigned int GetAtlasTexSizeY() const { return bigTexY; }
 
 	const spring::unordered_map<std::string, UnitTexture>& GetAtlasTextures() const { return textures; }
+
+	void DumpAtlasTextures(const std::string& fileExt = "png") const;
 
 private:
 	std::vector<TexFile> LoadTexFiles();
@@ -45,6 +48,7 @@ private:
 	GLuint atlas3do2 = 0;
 	int bigTexX = 0;
 	int bigTexY = 0;
+	int numLevels = 0;
 };
 
 extern C3DOTextureHandler textureHandler3DO;

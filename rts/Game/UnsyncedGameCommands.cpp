@@ -81,6 +81,7 @@
 #include "Rendering/Env/IWater.h"
 #include "Rendering/Env/GrassDrawer.h"
 #include "Rendering/Env/Particles/ProjectileDrawer.h"
+#include "Rendering/IconHandler.h"
 #include "Rendering/Fonts/glFont.h"
 #include "Rendering/Map/InfoTexture/IInfoTextureHandler.h"
 #include "Rendering/Map/InfoTexture/Modern/Path.h"
@@ -403,31 +404,6 @@ public:
 	}
 };
 
-
-
-class AdvModelShadingActionExecutor : public IUnsyncedActionExecutor {
-public:
-	AdvModelShadingActionExecutor() : IUnsyncedActionExecutor("AdvModelShading",
-			"Control advanced model shading mode",
-			false, {
-			{"", "Toggles advanced model shading mode"},
-			{"<on|off>", "Set advanced model shading mode <on|off>"},
-			}) {}
-
-	bool Execute(const UnsyncedAction& action) const {
-		static bool canUseShaders = unitDrawer->UseAdvShading();
-
-		if (!canUseShaders)
-			return false;
-
-		InverseOrSetBool(unitDrawer->UseAdvShadingRef(), action.GetArgs());
-		LogSystemStatus("model shaders", unitDrawer->UseAdvShading());
-		return true;
-	}
-};
-
-
-
 class AdvMapShadingActionExecutor : public IUnsyncedActionExecutor {
 public:
 	AdvMapShadingActionExecutor() : IUnsyncedActionExecutor("AdvMapShading",
@@ -636,6 +612,12 @@ public:
 		inMapDrawer->SetDrawMode(true);
 		return true;
 	}
+
+	bool ExecuteRelease(const UnsyncedAction& action) const final {
+		inMapDrawer->SetDrawMode(false);
+		// TODO: false for backwards compatibility (needs in depth review before changing)
+		return false;
+	}
 };
 
 
@@ -683,9 +665,37 @@ public:
 		return true;
 	}
 
+	bool ExecuteRelease(const UnsyncedAction& action) const final {
+		if (button == 4 || button == 5) {
+			// HACK   somehow weird things happen when MouseRelease is called for button 4 and 5.
+			// Note that SYS_WMEVENT on windows also only sends MousePress events for these buttons.
+			return false;
+		}
+		mouse->MouseRelease(mouse->lastx, mouse->lasty, button);
+		// TODO: false for backwards compatibility (needs in depth review)
+		return false;
+	}
+
 private:
 	int button;
 };
+
+
+class MouseStateActionExecutor : public IUnsyncedActionExecutor {
+public:
+	MouseStateActionExecutor() : IUnsyncedActionExecutor("MouseState", "Toggles mousestate") {}
+
+	bool Execute(const UnsyncedAction& action) const final {
+		// TODO: false for backwards compatibility (needs in depth review)
+		return false;
+	}
+	bool ExecuteRelease(const UnsyncedAction& action) const final {
+		mouse->ToggleMiddleClickScroll();
+		// TODO: false for backwards compatibility (needs in depth review)
+		return false;
+	}
+};
+
 
 class MouseCancelSelectionRectangleActionExecutor : public IUnsyncedActionExecutor {
 public:
@@ -745,6 +755,12 @@ public:
 		camera->SetMovState(moveStateIdx, true);
 
 		return halt;
+	}
+
+	bool ExecuteRelease(const UnsyncedAction& action) const final {
+		camera->SetMovState(moveStateIdx, false);
+		// TODO: false for backwards compatibility (needs in depth review)
+		return false;
 	}
 
 private:
@@ -1143,7 +1159,15 @@ class SpecFullViewActionExecutor : public IUnsyncedActionExecutor {
 public:
 	SpecFullViewActionExecutor() : IUnsyncedActionExecutor(
 		"SpecFullView",
-		"Sets or toggles between full LOS or ally-team LOS if the local user is a spectator"
+		"Sets or toggles LOS settings if the local user is a spectator. Fullview: See everything, otherwise visibility is determined by the current team. Fullselect: Whether all units can be selected",
+		false,
+		{
+			{"", "Toggles both Fullview and Fullselect from current values"},
+			{"0", "Not Fullview, Not Fullselect"},
+			{"1", "Fullview, Not Fullselect"},
+			{"2", "Not Fullview, Fullselect"},
+			{"3", "Fullview, Fullselect (default)"},
+		}
 	) {
 	}
 
@@ -1236,9 +1260,9 @@ public:
 	GroupActionExecutor() : IUnsyncedActionExecutor("Group", "Manage control groups", false, {
 			{"<n>", "Select group <n>, also focuses on second call (deprecated)"},
 			{"select <n>", "Select group <n>"},
-			{"focus <n>", "Focus camera on group <n>"},
+			{"focus <n> [smoothness]", "Focus camera on group <n> with optional camera smoothness"},
 			{"set <n>", "Set current selected units as group <n>"},
-			{"add <n>", "Add current selected units to group <n>"},
+			{"add <n>", "Add current selected units to group <n> (does not change selection)"},
 			{"unset", "Deassign control group for currently selected units"},
 			{"selectadd <n>", "Add members from group <n> to currently selected units"},
 			{"selectclear <n>", "Remove members from group <n> from currently selected units"},
@@ -1273,6 +1297,7 @@ public:
 				groupId = StringToInt(args[0], &parseFailure);
 				break;
 			case 2:
+			case 3: // NOTE: Right now GroupCommand's longest command only has 3 args
 				subCommand = args[0];
 				groupId = StringToInt(args[1], &parseFailure);
 				break;
@@ -1287,9 +1312,14 @@ public:
 		if (groupId < 0 || groupId > 9)
 			return WrongSyntax("groupId must be single digit number");
 
+		// NOTE: This only works with group commands that take exactly 1 required argument
+		std::vector<std::string> extraArgs = {};
+		for (int i = 2; i < args.size(); i++)
+			extraArgs.push_back(args[i]);
+
 		// Finally, actually run the command.
 		bool error;
-		const bool halt = uiGroupHandlers[gu->myTeam].GroupCommand(groupId, subCommand, error);
+		const bool halt = uiGroupHandlers[gu->myTeam].GroupCommand(groupId, subCommand, extraArgs, error);
 
 		if (error)
 			return WrongSyntax("subcommand " + subCommand + " not found");
@@ -1579,15 +1609,25 @@ public:
 	DebugGLActionExecutor() : IUnsyncedActionExecutor("DebugGL", "Enable/Disable OpenGL debug-context output") {}
 
 	bool Execute(const UnsyncedAction& action) const final {
-		bool enabled = !globalRendering->glDebug;
+		bool debugEnabled = !globalRendering->glDebug;
+
 		uint32_t msgSrceIdx = 0;
 		uint32_t msgTypeIdx = 0;
 		uint32_t msgSevrIdx = 0;
 
 		auto args = CSimpleParser::Tokenize(action.GetArgs());
 
-		if (args.size() > 0)
-			enabled = StringToBool(args[0]);
+		if (args.size() > 0) {
+			int options = StringToInt(args[0]);
+			if (options > 1) {
+				debugEnabled = !!(options & (1 << 1));
+				configHandler->Set("DebugGLReportGroups", !!(options & (1 << 2)), true);
+				configHandler->Set("DebugGLStacktraces",  !!(options & (1 << 3)), true);
+			}
+			else {
+				debugEnabled = !!(options & 1);
+			}
+		}
 
 		if (args.size() > 1)
 			msgSrceIdx = StringToInt(args[1]);
@@ -1596,7 +1636,7 @@ public:
 		if (args.size() > 3)
 			msgSevrIdx = StringToInt(args[3]);
 
-		globalRendering->glDebug = enabled;
+		globalRendering->glDebug = debugEnabled;
 		globalRendering->ToggleGLDebugOutput(msgSrceIdx, msgTypeIdx, msgSevrIdx);
 
 		return true;
@@ -1793,6 +1833,27 @@ public:
 };
 
 
+class GameInfoCloseActionExecutor : public IUnsyncedActionExecutor {
+public:
+	GameInfoCloseActionExecutor() : IUnsyncedActionExecutor("GameInfoClose", "Closes game info") {}
+
+	bool Execute(const UnsyncedAction& action) const final {
+		// TODO: false for backwards compatibility (may or may not make sense to keep it, probably not)
+		return false;
+	}
+
+	bool ExecuteRelease(const UnsyncedAction& action) const final {
+		if (CGameInfo::IsActive()) {
+			// TODO: handled in release, and return false for backwards compatibility
+			// (needs in depth review)
+			CGameInfo::Disable();
+			return false;
+		}
+		return false;
+	}
+};
+
+
 
 class HideInterfaceActionExecutor : public IUnsyncedActionExecutor {
 public:
@@ -1928,6 +1989,28 @@ public:
 	}
 };
 
+class RotateSkyActionExecutor : public IUnsyncedActionExecutor {
+public:
+	RotateSkyActionExecutor() : IUnsyncedActionExecutor("RotateSky",
+		"Rotates the sky around axis by angle") {
+	}
+
+	bool Execute(const UnsyncedAction& action) const final {
+		auto args = CSimpleParser::Tokenize(action.GetArgs());
+		if (args.size() != 4)
+			return false;
+
+		const auto axisAngle = float4{
+			StringToInt<float>(args[0]),
+			StringToInt<float>(args[1]),
+			StringToInt<float>(args[2]),
+			StringToInt<float>(args[3])
+		};
+
+		ISky::GetSky()->SetSkyAxisAngle(axisAngle);
+		return true;
+	}
+};
 
 class FeatureFadeDistActionExecutor : public IUnsyncedActionExecutor {
 public:
@@ -2054,31 +2137,48 @@ public:
 	}
 };
 
-class ShowElevationActionExecutor : public IUnsyncedActionExecutor {
+class IShowInfoTexActionExecutor : public IUnsyncedActionExecutor {
 public:
-	ShowElevationActionExecutor() : IUnsyncedActionExecutor("ShowElevation", "Enable rendering of the auxiliary height-map overlay") {
+	IShowInfoTexActionExecutor(const std::string& command, const std::string& description, bool cheatRequired = false) : IUnsyncedActionExecutor(command, description, cheatRequired) {
 	}
+	bool SetMode(const UnsyncedAction& action, const std::string mode, const std::string value) const {
+		const bool wasEnabled = infoTextureHandler->GetMode() == mode;
+		bool enabled = wasEnabled;
 
-	bool Execute(const UnsyncedAction& action) const final {
-		infoTextureHandler->ToggleMode("height");
+		InverseOrSetBool(enabled, value);
+
+		if (enabled && !wasEnabled)
+			infoTextureHandler->SetMode(mode);
+		else if (!enabled && wasEnabled)
+			infoTextureHandler->DisableCurrentMode();
+
 		return true;
 	}
 };
 
-class ShowMetalMapActionExecutor : public IUnsyncedActionExecutor {
+class ShowElevationActionExecutor : public IShowInfoTexActionExecutor {
 public:
-	ShowMetalMapActionExecutor() : IUnsyncedActionExecutor("ShowMetalMap", "Enable rendering of the auxiliary metal-map overlay") {
+	ShowElevationActionExecutor() : IShowInfoTexActionExecutor("ShowElevation", "Enable rendering of the auxiliary height-map overlay") {
 	}
 
 	bool Execute(const UnsyncedAction& action) const final {
-		infoTextureHandler->ToggleMode("metal");
-		return true;
+		return SetMode(action, "height", action.GetArgs());
 	}
 };
 
-class ShowPathTravActionExecutor : public IUnsyncedActionExecutor {
+class ShowMetalMapActionExecutor : public IShowInfoTexActionExecutor {
 public:
-	ShowPathTravActionExecutor() : IUnsyncedActionExecutor("ShowPathTraversability", "Enable rendering of the path traversability-map overlay") {
+	ShowMetalMapActionExecutor() : IShowInfoTexActionExecutor("ShowMetalMap", "Enable rendering of the auxiliary metal-map overlay") {
+	}
+
+	bool Execute(const UnsyncedAction& action) const final {
+		return SetMode(action, "metal", action.GetArgs());
+	}
+};
+
+class ShowPathTravActionExecutor : public IShowInfoTexActionExecutor {
+public:
+	ShowPathTravActionExecutor() : IShowInfoTexActionExecutor("ShowPathTraversability", "Enable rendering of the path traversability-map overlay") {
 	}
 
 	bool Execute(const UnsyncedAction& action) const final {
@@ -2087,47 +2187,88 @@ public:
 		if (pathTexInfo != nullptr)
 			pathTexInfo->ShowMoveDef(-1);
 
-		infoTextureHandler->ToggleMode("path");
-		return true;
+		return SetMode(action, "path", action.GetArgs());
 	}
 };
 
-class ShowPathHeatActionExecutor : public IUnsyncedActionExecutor {
+class ShowPathHeatActionExecutor : public IShowInfoTexActionExecutor {
 public:
-	ShowPathHeatActionExecutor() : IUnsyncedActionExecutor("ShowPathHeat", "Enable/Disable rendering of the path heat-map overlay", true) {
+	ShowPathHeatActionExecutor() : IShowInfoTexActionExecutor("ShowPathHeat", "Enable/Disable rendering of the path heat-map overlay", true) {
 	}
 
 	bool Execute(const UnsyncedAction& action) const final {
-		infoTextureHandler->ToggleMode("heat");
-		return true;
+		return SetMode(action, "heat", action.GetArgs());
 	}
 };
 
-class ShowPathFlowActionExecutor : public IUnsyncedActionExecutor {
+class ShowPathFlowActionExecutor : public IShowInfoTexActionExecutor {
 public:
-	ShowPathFlowActionExecutor() : IUnsyncedActionExecutor("ShowPathFlow", "Enable/Disable rendering of the path flow-map overlay", true) {
+	ShowPathFlowActionExecutor() : IShowInfoTexActionExecutor("ShowPathFlow", "Enable/Disable rendering of the path flow-map overlay", true) {
 	}
 
 	bool Execute(const UnsyncedAction& action) const final {
-		infoTextureHandler->ToggleMode("flow");
-		return true;
+		return SetMode(action, "flow", action.GetArgs());
 	}
 };
 
-class ShowPathCostActionExecutor : public IUnsyncedActionExecutor {
+class ShowPathCostActionExecutor : public IShowInfoTexActionExecutor {
 public:
-	ShowPathCostActionExecutor() : IUnsyncedActionExecutor("ShowPathCost", "Enable rendering of the path cost-map overlay", true) {
+	ShowPathCostActionExecutor() : IShowInfoTexActionExecutor("ShowPathCost", "Enable rendering of the path cost-map overlay", true) {
 	}
 
 	bool Execute(const UnsyncedAction& action) const final {
-		infoTextureHandler->ToggleMode("pathcost");
-		return true;
+		return SetMode(action, "pathcost", action.GetArgs());
 	}
 };
 
-class ToggleLOSActionExecutor : public IUnsyncedActionExecutor {
+class ShowLOSActionExecutor : public IShowInfoTexActionExecutor {
 public:
-	ToggleLOSActionExecutor() : IUnsyncedActionExecutor("ToggleLOS", "Enable rendering of the auxiliary LOS-map overlay") {
+	ShowLOSActionExecutor() : IShowInfoTexActionExecutor("ShowLOS", "Enable rendering of the auxiliary LOS-map overlay") {
+	}
+
+	bool Execute(const UnsyncedAction& action) const final {
+		return SetMode(action, "los", action.GetArgs());
+	}
+};
+
+class ShowInfoTexActionExecutor : public IShowInfoTexActionExecutor {
+public:
+	ShowInfoTexActionExecutor() : IShowInfoTexActionExecutor("ShowInfoTex", "Enable rendering of an arbitrary info texture view", true) {
+	}
+
+	bool CommandError(const std::string description, bool showHint, bool showModes) const {
+		LOG_L(L_WARNING, "/%s error: %s", GetCommand().c_str(), description.c_str());
+
+		if (showHint)
+			LOG("usage:   /%s <mode> [on/off/1/0]", GetCommand().c_str());
+
+		if (showModes) {
+			std::stringstream ss;
+			const auto allModes = infoTextureHandler->GetModes();
+			for (auto it = allModes.begin(); it != allModes.end(); it++)
+				ss << *it << (it + 1 == allModes.end() ? "" : ", ");
+			LOG("modes:   %s", ss.str().c_str());
+		}
+
+		return true;
+	}
+
+	bool Execute(const UnsyncedAction& action) const final {
+		const auto args = CSimpleParser::Tokenize(action.GetArgs());
+		if (args.size() < 1)
+			return CommandError("missing mandatory argument \"mode\"", true, true);
+
+		const auto& mode = args[0];
+		if (infoTextureHandler->HasMode(mode))
+			return SetMode(action, mode, args.size() > 1 ? args[1] : "");
+		else
+			return CommandError(std::format("infotex mode does not exist '{}'", mode), false, true);
+	}
+};
+
+class ToggleLOSActionExecutor : public IShowInfoTexActionExecutor {
+public:
+	ToggleLOSActionExecutor() : IShowInfoTexActionExecutor("ToggleLOS", "Toggle rendering of the auxiliary LOS-map overlay") {
 	}
 
 	bool Execute(const UnsyncedAction& action) const final {
@@ -2829,7 +2970,24 @@ public:
 
 class MiniMapActionExecutor : public IUnsyncedActionExecutor {
 public:
-	MiniMapActionExecutor() : IUnsyncedActionExecutor("MiniMap", "FIXME document subcommands") {
+	MiniMapActionExecutor() : IUnsyncedActionExecutor("MiniMap", "Various subcommands to control the minimap", false, {
+			{"fullproxy [0|1]", "Enable (1) or disable (0) full proxy mode. No argument toggles."},
+			{"icons [0|1]", "Enable (1) or disable (0) unit icons. No argument toggles."},
+			{"unitexp <float>", "Set unit size exponent (float)."},
+			{"unitsize <float>", "Set base unit size (float, min 0.0)."},
+			{"drawcommands [<int>]", "Set draw commands level (int >= 0). No argument toggles between 0 and 1."},
+			{"drawprojectiles [0|1]", "Enable (1) or disable (0) drawing projectiles. No argument toggles."},
+			{"drawpings [0|1]", "Enable (1) or disable (0) drawing pings. No argument toggles. Disabling clears pings."},
+			{"simplecolors [0|1]", "Enable (1) or disable (0) simple minimap colors. No argument toggles."},
+			{"geo <geometry>", "Set minimap geometry (not available in dualscreen mode)."},
+			{"geometry <geometry>", "Set minimap geometry (not available in dualscreen mode)."},
+			{"min [0|1]", "Minimize (1) or restore (0) minimap (not available in dualscreen mode). No argument toggles."},
+			{"minimize [0|1]", "Minimize (1) or restore (0) minimap (not available in dualscreen mode). No argument toggles."},
+			{"max [0|1]", "Maximize (1) or restore (0) minimap (not available in dualscreen mode). No argument toggles."},
+			{"maximize [0|1]", "Maximize (1) or restore (0) minimap (not available in dualscreen mode). No argument toggles."},
+			{"maxspect [0|1]", "Maximize (1) or restore (0) minimap with aspect ratio (not available in dualscreen mode). No argument toggles."},
+			{"mouseevents [0|1]", "Enable (1) or disable (0) mouse interaction. No argument toggles."},
+			}) {
 	}
 
 	bool Execute(const UnsyncedAction& action) const final {
@@ -3659,28 +3817,51 @@ public:
 	}
 
 	bool Execute(const UnsyncedAction& action) const final {
-		auto projFunc = []() {
+		auto args = CSimpleParser::Tokenize(action.GetArgs(), 1);
+
+		// extract optional file extension (last arg if not a known atlas name)
+		std::string fileExt = "png";
+		if (!args.empty()) {
+			auto lastArg = StringToLower(args.back());
+			switch (hashString(lastArg.c_str())) {
+				case hashString("proj"):
+				case hashString("3do"):
+				case hashString("decal"):
+				case hashString("decals"):
+				case hashString("icons"):
+					break;
+				default:
+					fileExt = std::move(lastArg);
+					args.pop_back();
+					break;
+			}
+		}
+
+		auto projFunc = [&fileExt]() {
 			LOG("Dumping projectile textures");
-			projectileDrawer->textureAtlas->DumpTexture("TextureAtlas");
-			projectileDrawer->groundFXAtlas->DumpTexture("GroundFXAtlas");
+			projectileDrawer->textureAtlas->DumpTexture("TextureAtlas", fileExt);
+			projectileDrawer->groundFXAtlas->DumpTexture("GroundFXAtlas", fileExt);
 		};
-		auto threeDoFunc = []() {
+		auto threeDoFunc = [&fileExt]() {
 			LOG("Dumping 3do atlas textures");
-			glSaveTexture(textureHandler3DO.GetAtlasTex1ID(), "3doTex1.png");
-			glSaveTexture(textureHandler3DO.GetAtlasTex2ID(), "3doTex2.png");
+			textureHandler3DO.DumpAtlasTextures(fileExt);
 		};
-		auto decalsFunc = []() {
+		auto decalsFunc = [&fileExt]() {
 			LOG("Dumping decal atlas textures");
-			groundDecals->DumpAtlasTextures();
+			groundDecals->DumpAtlasTextures(fileExt);
+		};
+		auto iconsFunc = [&fileExt]() {
+			LOG("Dumping icon atlas textures");
+			icon::iconHandler.DumpAtlasTextures(fileExt);
 		};
 		std::array argsExec = {
 			ArgTuple(hashString("proj"), false, projFunc),
 			ArgTuple(hashString("3do"), false, threeDoFunc),
 			ArgTuple(hashString("decal"), false, decalsFunc),
-			ArgTuple(hashString("decals"), false, decalsFunc)
+			ArgTuple(hashString("decals"), false, decalsFunc),
+			ArgTuple(hashString("icons"), false, iconsFunc)
 		};
 
-		auto args = CSimpleParser::Tokenize(action.GetArgs(), 1);
 		return GenericArgsExecutor(args, argsExec);
 	}
 };
@@ -3818,82 +3999,27 @@ private:
 } // namespace (unnamed)
 
 
-
-
-
-// TODO CGame stuff in UnsyncedGameCommands: refactor (or move)
-bool CGame::ActionReleased(const Action& action)
+bool UnsyncedGameCommands::ActionPressed(const Action& action, bool isRepeat)
 {
-	switch (hashString(action.command.c_str())) {
-		case hashString("drawinmap"): {
-			inMapDrawer->SetDrawMode(false);
-		} break;
+	const IUnsyncedActionExecutor* executor = GetActionExecutor(action.command);
 
-		case hashString("moveforward"): {
-			camera->SetMovState(CCamera::MOVE_STATE_FWD, false);
-		} break;
-		case hashString("moveback"): {
-			camera->SetMovState(CCamera::MOVE_STATE_BCK, false);
-		} break;
-		case hashString("moveleft"): {
-			camera->SetMovState(CCamera::MOVE_STATE_LFT, false);
-		} break;
-		case hashString("moveright"): {
-			camera->SetMovState(CCamera::MOVE_STATE_RGT, false);
-		} break;
-		case hashString("moveup"): {
-			camera->SetMovState(CCamera::MOVE_STATE_UP, false);
-		} break;
-		case hashString("movedown"): {
-			camera->SetMovState(CCamera::MOVE_STATE_DWN, false);
-		} break;
+	if (executor != nullptr) {
+		// an executor for that action was found
+		if (executor->ExecuteAction(UnsyncedAction(action, isRepeat)))
+			return true;
+	}
 
-		case hashString("movefast"): {
-			camera->SetMovState(CCamera::MOVE_STATE_FST, false);
-		} break;
-		case hashString("moveslow"): {
-			camera->SetMovState(CCamera::MOVE_STATE_SLW, false);
-		} break;
-		case hashString("movetilt"): {
-			camera->SetMovState(CCamera::MOVE_STATE_TLT, false);
-		} break;
-		case hashString("movereset"): {
-			camera->SetMovState(CCamera::MOVE_STATE_RST, false);
-		} break;
-		case hashString("moverotate"): {
-			camera->SetMovState(CCamera::MOVE_STATE_RTT, false);
-		} break;
+	return false;
+}
 
-		case hashString("mouse1"): {
-			mouse->MouseRelease(mouse->lastx, mouse->lasty, 1);
-		} break;
-		case hashString("mouse2"): {
-			mouse->MouseRelease(mouse->lastx, mouse->lasty, 2);
-		} break;
-		case hashString("mouse3"): {
-			mouse->MouseRelease(mouse->lastx, mouse->lasty, 3);
-		} break;
+bool UnsyncedGameCommands::ActionReleased(const Action& action)
+{
+	const IUnsyncedActionExecutor* executor = GetActionExecutor(action.command);
 
-		#if 0
-		// HACK   somehow weird things happen when MouseRelease is called for button 4 and 5.
-		// Note that SYS_WMEVENT on windows also only sends MousePress events for these buttons.
-		case hashString("mouse4"): {
-			mouse->MouseRelease(mouse->lastx, mouse->lasty, 4);
-		} break;
-		case hashString("mouse5"): {
-			mouse->MouseRelease(mouse->lastx, mouse->lasty, 5);
-		} break;
-		#endif
-
-		case hashString("mousestate"): {
-			mouse->ToggleMiddleClickScroll();
-		} break;
-		case hashString("gameinfoclose"): {
-			CGameInfo::Disable();
-		} break;
-
-		default: {
-		} break;
+	if (executor != nullptr) {
+		// an executor for that action was found
+		if (executor->ExecuteActionRelease(UnsyncedAction(action, false)))
+			return true;
 	}
 
 	return false;
@@ -3917,7 +4043,6 @@ void UnsyncedGameCommands::AddDefaultActionExecutors()
 	AddActionExecutor(AllocActionExecutor<MapMeshDrawerActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<MapBorderActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<WaterActionExecutor>());
-	AddActionExecutor(AllocActionExecutor<AdvModelShadingActionExecutor>()); // [maint]
 	AddActionExecutor(AllocActionExecutor<AdvMapShadingActionExecutor>()); // [maint]
 	AddActionExecutor(AllocActionExecutor<UnitDrawerTypeActionExecutor>()); // [maint]
 	AddActionExecutor(AllocActionExecutor<FeatureDrawerTypeActionExecutor>()); // [maint]
@@ -3947,6 +4072,7 @@ void UnsyncedGameCommands::AddDefaultActionExecutors()
 	AddActionExecutor(AllocActionExecutor<CameraMoveActionExecutor>(CCamera::MOVE_STATE_TLT, "Tilt"  , false));
 	AddActionExecutor(AllocActionExecutor<CameraMoveActionExecutor>(CCamera::MOVE_STATE_RST, "Reset" , false));
 	AddActionExecutor(AllocActionExecutor<CameraMoveActionExecutor>(CCamera::MOVE_STATE_RTT, "Rotate", false));
+	AddActionExecutor(AllocActionExecutor<MouseStateActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<AIKillReloadActionExecutor>(true));
 	AddActionExecutor(AllocActionExecutor<AIKillReloadActionExecutor>(false));
 	AddActionExecutor(AllocActionExecutor<AIControlActionExecutor>());
@@ -3997,6 +4123,7 @@ void UnsyncedGameCommands::AddDefaultActionExecutors()
 	AddActionExecutor(AllocActionExecutor<NetMsgSmoothingActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<SpeedControlActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<GameInfoActionExecutor>());
+	AddActionExecutor(AllocActionExecutor<GameInfoCloseActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<HideInterfaceActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<HardwareCursorActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<FullscreenActionExecutor>());
@@ -4007,6 +4134,7 @@ void UnsyncedGameCommands::AddDefaultActionExecutors()
 	AddActionExecutor(AllocActionExecutor<GroundDetailActionExecutor>());
 	// [devel] AddActionExecutor(AllocActionExecutor<MoreGrassActionExecutor>());
 	// [devel] AddActionExecutor(AllocActionExecutor<LessGrassActionExecutor>());
+	// [devel] AddActionExecutor(AllocActionExecutor<RotateSkyActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<FeatureFadeDistActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<FeatureDrawDistActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<SpeedUpActionExecutor>());
@@ -4015,6 +4143,8 @@ void UnsyncedGameCommands::AddDefaultActionExecutors()
 	AddActionExecutor(AllocActionExecutor<ControlUnitActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<ShowStandardActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<ShowElevationActionExecutor>());
+	AddActionExecutor(AllocActionExecutor<ShowInfoTexActionExecutor>());
+	AddActionExecutor(AllocActionExecutor<ShowLOSActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<ShowMetalMapActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<ShowPathTravActionExecutor>());
 	AddActionExecutor(AllocActionExecutor<ShowPathHeatActionExecutor>());
@@ -4137,4 +4267,3 @@ void UnsyncedGameCommands::DestroyInstance(bool reload) {
 	spring::SafeDestruct(singleton);
 	std::memset(ugcSingletonMem, 0, sizeof(ugcSingletonMem));
 }
-

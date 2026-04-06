@@ -30,7 +30,6 @@ void CInfoConsole::InitStatic() {
 
 void CInfoConsole::KillStatic() {
 	RECOIL_DETAILED_TRACY_ZONE;
-	assert(infoConsole != nullptr);
 	spring::SafeDestruct(infoConsole);
 	std::fill(std::begin(infoConsoleMem), std::end(infoConsoleMem), std::byte{0});
 }
@@ -214,9 +213,6 @@ void CInfoConsole::RecordLogMessage(int level, const std::string& section, const
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	std::lock_guard<decltype(infoConsoleMutex)> scoped_lock(infoConsoleMutex);
-
-	if (section == prvSection && message == prvMessage)
-		return;
 
 	newLines += (newLines < maxRawLines);
 

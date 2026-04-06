@@ -3,7 +3,6 @@
 
 #include <cmath>
 #include <cstdlib>
-#include <cstdio>
 
 #if !defined(HEADLESS)
 	#include "lib/squish/squish.h"
@@ -34,8 +33,6 @@
 #include "System/Threading/ThreadPool.h" // for_mt
 
 #include "System/Misc/TracyDefs.h"
-
-using std::sprintf;
 
 #define LOG_SECTION_SMF_GROUND_TEXTURES "CSMFGroundTextures"
 LOG_REGISTER_SECTION_GLOBAL(LOG_SECTION_SMF_GROUND_TEXTURES)
@@ -84,6 +81,12 @@ CSMFGroundTextures::CSMFGroundTextures(CSMFReadMap* rm): smfMap(rm)
 	} else {
 		LoadSquareTexturesPersistent();
 	}
+}
+
+CSMFGroundTextures::~CSMFGroundTextures()
+{
+	// explicitly kill textures, as doing so in the static destructor is too late (GLAD is already unloaded)
+	squares.clear();
 }
 
 void CSMFGroundTextures::LoadTiles(CSMFMapFile& file)
@@ -180,7 +183,7 @@ void CSMFGroundTextures::LoadTiles(CSMFMapFile& file)
 	}
 
 
-#if !defined(HEADLESS) && defined(GL_ARB_ES3_compatibility)
+#ifndef HEADLESS
 	if (RecompressTilesIfNeeded()) {
 		// Not all FOSS drivers support S3TC, use ETC1 for those if possible
 		// ETC2 is backward compatible with ETC1! GLEW doesn't have the ETC1 extension :<
@@ -285,7 +288,7 @@ void CSMFGroundTextures::ConvolveHeightMap(const int mapWidth, const int mipLeve
 	}
 }
 
-#if !defined(HEADLESS) && defined(GL_ARB_ES3_compatibility)
+#ifndef HEADLESS
 // Not all FOSS drivers support S3TC, use ETC1 for those if possible
 bool CSMFGroundTextures::RecompressTilesIfNeeded()
 {

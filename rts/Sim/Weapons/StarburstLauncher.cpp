@@ -39,14 +39,16 @@ void CStarburstLauncher::FireImpl(const bool scriptCall)
 	params.end = currentTargetPos;
 	params.speed = speed;
 	params.error = aimError;
-	params.ttl = 200; //???
+	// Projectile TTL (params.ttl) is ignored by the Starburst Projectile and it only uses the weapondef.
+	// I tried overriding the projectile TTL to 1 and it caused the starburst rocket to fly off into space
+	params.ttl = (ttl > 0) ? ttl : weaponDef->flighttime;
 	params.tracking = tracking;
-	params.maxRange = (weaponDef->flighttime > 0 || weaponDef->fixedLauncher)? MAX_PROJECTILE_RANGE: range;
+	params.maxRange = (ttl > 0 || weaponDef->fixedLauncher) ? MAX_PROJECTILE_RANGE : range;
 
 	WeaponProjectileFactory::LoadProjectile(params);
 }
 
-bool CStarburstLauncher::HaveFreeLineOfFire(const float3 srcPos, const float3 tgtPos, const SWeaponTarget& trg) const
+bool CStarburstLauncher::HaveFreeLineOfFire(const float3& srcPos, const float3& tgtPos, const SWeaponTarget& trg) const
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	return (!TraceRay::TestCone(srcPos, weaponDef->fixedLauncher? weaponDir: UpVector, 100.0f, 0.0f, owner->allyteam, avoidFlags, owner));

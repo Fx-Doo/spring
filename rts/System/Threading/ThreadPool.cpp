@@ -8,13 +8,13 @@
 #if (!defined(UNITSYNC) && !defined(UNIT_TEST))
 	#include "System/GameLoadThread.h"
 #endif
-#include "System/TimeProfiler.h"
+// #include "System/TimeProfiler.h"
 #include "System/StringUtil.h"
 #ifndef UNIT_TEST
 	#include "System/Config/ConfigHandler.h"
 #endif
 #include "System/Log/ILog.h"
-#include "System/Platform/CpuID.h"
+#include "System/Platform/CpuTopology.h"
 #include "System/Platform/Threading.h"
 #include "System/Threading/SpringThreading.h"
 
@@ -62,7 +62,7 @@ struct ThreadStats {
 static std::vector< spring::thread > extThreads;
 static std::vector< std::future<void> > extFutures;
 
-bool ThreadPool::inMultiThreadedSection;
+static _threadlocal bool inMultiThreadedSection(false);
 
 // global [idx = 0] and smaller per-thread [idx > 0] queues; the latter are
 // for tasks that want to execute on specific threads, e.g. parallel_reduce
@@ -71,6 +71,7 @@ bool ThreadPool::inMultiThreadedSection;
 static std::array<boost::lockfree::queue<ITaskGroup*>, ThreadPool::MAX_THREADS> taskQueues[2];
 #else
 static std::array<moodycamel::ConcurrentQueue<ITaskGroup*>, ThreadPool::MAX_THREADS> taskQueues[2];
+static std::array<moodycamel::ConcurrentQueue<ITaskGroup*>, ThreadPool::MAX_THREADS> taskQueuesSyncBackground[2];
 #endif
 
 static std::vector<void*> workerThreads[2];
@@ -99,6 +100,10 @@ namespace ThreadPool {
 int GetThreadNum() { return threadnum; }
 static void SetThreadNum(const int idx) { threadnum = idx; }
 
+
+int IsInMultiThreadedSection() { return inMultiThreadedSection; }
+void SetInMultiThreadedSection(const bool value) { inMultiThreadedSection = value; }
+
 static int GetConfigNumWorkers() {
 	#ifndef UNIT_TEST
 	return configHandler->GetInt("WorkerThreadCount");
@@ -112,7 +117,7 @@ static int GetDefaultNumWorkers() {
 	const int cfgNumWorkers = GetConfigNumWorkers();
 
 	if (cfgNumWorkers < 0) {
-		return Threading::GetPhysicalCpuCores();
+		return Threading::GetOptimalThreadCount();
 	}
 
 	if (cfgNumWorkers > maxNumThreads) {
@@ -145,11 +150,26 @@ static bool DoTask(int tid, bool async)
 	// id=0 and *only* processes tasks from the global queue
 	for (int idx = 0; idx <= tid; idx += std::max(tid, 1)) {
 		auto& queue = taskQueues[async][idx];
+		auto& queue_background = taskQueuesSyncBackground[async][idx];
+
+		auto tryDequeue = [&](ITaskGroup*& tg){
+		#ifndef UNIT_TEST
+			if (CSyncChecker::InSyncedCode()) {
+				return ( queue.try_dequeue(tg) || queue_background.try_dequeue(tg) );
+			}
+			else {
+				// Synced tasks take priority over unsynced tasks.
+				return ( queue_background.try_dequeue(tg) || queue.try_dequeue(tg) );
+			}
+		#else
+			return ( queue.try_dequeue(tg) || queue_background.try_dequeue(tg) );
+		#endif
+		};
 
 		#ifdef USE_BOOST_LOCKFREE_QUEUE
 		if (queue.pop(tg)) {
 		#else
-		if (queue.try_dequeue(tg)) {
+		if (tryDequeue(tg)) {
 		#endif
 			// inform other workers when there is global work to do
 			// waking is an expensive kernel-syscall, so better shift this
@@ -158,6 +178,8 @@ static bool DoTask(int tid, bool async)
 			if (idx == 0)
 				NotifyWorkerThreads(true, async);
 
+			bool reschedule = !tg->IsHighPriority() && !tg->SelfDelete() && tg->ShouldReschedule();
+
 			assert(!async || tg->IsAsyncTask());
 
 			#ifdef USE_TASK_STATS_TRACKING
@@ -174,14 +196,19 @@ static bool DoTask(int tid, bool async)
 			#else
 			tg->ExecuteLoop(tid, false);
 			#endif
+
+			if (reschedule)
+				while (!queue_background.enqueue(tg));
 		}
 
 		#ifdef USE_BOOST_LOCKFREE_QUEUE
 		while (queue.pop(tg)) {
 		#else
-		while (queue.try_dequeue(tg)) {
+		while (tryDequeue(tg)) {
 		#endif
 			assert(!async || tg->IsAsyncTask());
+
+			bool reschedule = !tg->IsHighPriority() && !tg->SelfDelete() && tg->ShouldReschedule();
 
 			#ifdef USE_TASK_STATS_TRACKING
 			const uint64_t wdt = tg->GetDeltaTime(spring_now());
@@ -197,6 +224,9 @@ static bool DoTask(int tid, bool async)
 			#else
 			tg->ExecuteLoop(tid, false);
 			#endif
+
+			if (reschedule)
+				while (!queue_background.enqueue(tg));
 		}
 	}
 
@@ -210,6 +240,7 @@ static void WorkerLoop(int tid, bool async)
 {
 	assert(tid != 0);
 	SetThreadNum(tid);
+	SetInMultiThreadedSection(true);
 	#ifndef UNIT_TEST
 	Threading::SetThreadName(IntToString(tid, "worker%i"));
 	#endif
@@ -301,7 +332,9 @@ void WaitForFinished(std::shared_ptr<ITaskGroup>&& taskGroup)
 void PushTaskGroup(std::shared_ptr<ITaskGroup>&& taskGroup) { PushTaskGroup(taskGroup.get()); }
 void PushTaskGroup(ITaskGroup* taskGroup)
 {
-	auto& queue = taskQueues[ taskGroup->IsAsyncTask() ][ taskGroup->WantedThread() ];
+	auto& queue = (taskGroup->IsHighPriority())
+			? taskQueues[ taskGroup->IsAsyncTask() ][ taskGroup->WantedThread() ]
+			: taskQueuesSyncBackground[ taskGroup->IsAsyncTask() ][ taskGroup->WantedThread() ];
 
 	#if 0
 	// fake single-task group, handled by WaitForFinished to
@@ -410,6 +443,8 @@ static void KillThreads(int wantedNumThreads, int curNumThreads)
 		#else
 		while (taskQueues[false][i].try_dequeue(tg));
 		while (taskQueues[ true][i].try_dequeue(tg));
+		while (taskQueuesSyncBackground[false][i].try_dequeue(tg));
+		while (taskQueuesSyncBackground[ true][i].try_dequeue(tg));
 		#endif
 	}
 
@@ -584,18 +619,34 @@ void SetMaximumThreadCount()
 	SetThreadCount(GetMaxThreads());
 }
 
+/**
+ * ThreadPolicyObject
+ */
+
 void SetDefaultThreadCount()
 {
-	std::uint32_t systemCores  = springproc::CPUID::GetInstance().GetAvailableProceesorAffinityMask();
+	#if !defined(THREADPOOL)
+	return;
+	#endif
+
+	const int threadCount = GetDefaultNumWorkers();
+	SetThreadCount(threadCount);
+
+	std::uint32_t systemCores = Threading::GetSystemAffinityMask(threadCount);
 	std::uint32_t mainAffinity = systemCores;
 
+	const cpu_topology::ThreadPinPolicy threadPinPolicy = Threading::GetChosenThreadPinPolicy();
+
 	#ifndef UNIT_TEST
-	mainAffinity &= configHandler->GetUnsigned("SetCoreAffinity");
+	std::uint32_t configAffinity = configHandler->GetUnsigned("SetCoreAffinity");
+	mainAffinity &= (configAffinity != 0) ? configAffinity
+		: (threadPinPolicy == cpu_topology::THREAD_PIN_POLICY_PER_PERF_CORE)
+			? Threading::GetPreferredMainThreadMask(systemCores)
+			: 0;
+	LOG("[ThreadPool] Main thread affinity requested as 0x%08x", mainAffinity);
 	#endif
 
 	std::uint32_t workerAvailCores = systemCores & ~mainAffinity;
-
-	SetThreadCount(GetDefaultNumWorkers());
 
 	{
 		// parallel_reduce now folds over shared_ptrs to futures
@@ -608,8 +659,10 @@ void SetDefaultThreadCount()
 			if (i == 0)
 				return 0;
 
-			const std::uint32_t workerCore = FindWorkerThreadCore(i - 1, workerAvailCores, mainAffinity);
-			// const std::uint32_t workerCore = workerAvailCores;
+			const std::uint32_t workerCore =
+				 (threadPinPolicy == cpu_topology::THREAD_PIN_POLICY_PER_PERF_CORE)
+				 ? FindWorkerThreadCore(i - 1, workerAvailCores, mainAffinity)
+				 : workerAvailCores;
 
 			char threadName[20];
 			std::snprintf(threadName, sizeof(threadName), "Worker %d", i);
@@ -618,13 +671,16 @@ void SetDefaultThreadCount()
 			return workerCore;
 		};
 
-		const std::uint32_t poolCoreAffinity = parallel_reduce(AffinityFunc, ReduceFunc);
-		const std::uint32_t mainCoreAffinity = Threading::HasHyperThreading() ? ~poolCoreAffinity : ~0;
+		const std::uint32_t poolCoreAffinity = parallel_reduce<SyncTask<decltype(AffinityFunc)>>(AffinityFunc, ReduceFunc);
+		const std::uint32_t mainCoreAffinity = ~poolCoreAffinity & systemCores;
 
 		if (mainAffinity == 0)
 			mainAffinity = systemCores;
 
-		Threading::SetAffinityHelper("Main", mainAffinity & mainCoreAffinity);
+		if (threadPinPolicy == cpu_topology::THREAD_PIN_POLICY_PER_PERF_CORE)
+			mainAffinity &= mainCoreAffinity;
+
+		Threading::SetAffinityHelper("Main", mainAffinity);
 	}
 }
 

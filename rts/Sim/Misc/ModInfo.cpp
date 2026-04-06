@@ -12,7 +12,7 @@
 #include "System/Exceptions.h"
 #include "System/SpringMath.h"
 
-#include "lib/fmt/format.h"
+#include <fmt/format.h>
 
 #include <bit>
 
@@ -44,6 +44,24 @@ void CModInfo::ResetState()
 		groundUnitCollisionAvoidanceUpdateRate = 3;
 	}
 	{
+		// Default values for guard behavior (replicates the original behavior)
+		guardRecalculateThreshold = 100.0f;  // Distance that a guardee must move before the guard goal is recalculated
+		guardStoppedProximityGoal = 50.0f;  // Distance that a guardian will stop at nearing a stopped guardee
+		guardStoppedExtraDistance = 100.0f;  // The extra distance a guardian will keep from a stopped guardee
+		guardMovingProximityGoal = 150.0f;   // Distance the guardian is considered to be in guarding range and will match the velocity
+		guardMovingIntervalMultiplier = 0.0f;  // A multiplier for the moving goal while guarding, smaller values will result in higher detail movement but more performance cost
+		guardInterceptionLimit = 0.0f;        // Limit for the intercept when a guardian is not in guarding range
+	}
+	// {
+	// 	Recommended values for guard behavior (units keep formation and do not lag behind, slightly intercept)
+	// 	guardRecalculateThreshold = 100.0f;  // Distance that a guardee must move before the guard goal is recalculated
+	// 	guardStoppedProximityGoal = 50.0f;  // Distance that a guardian will stop at nearing a stopped guardee
+	// 	guardStoppedExtraDistance = 100.0f;  // The extra distance a guardian will keep from a stopped guardee
+	// 	guardMovingProximityGoal = 100.0f;   // Distance the guardian is considered to be in guarding range and will match the velocity
+	// 	guardMovingIntervalMultiplier = 2.13f;  // A multiplier for the moving goal while guarding, smaller values will result in higher detail movement but more performance cost
+	// 	guardInterceptionLimit = 128.0f;        // Limit for the intercept when a guardian is not in guarding range
+	// }
+	{
 		constructionDecay      = true;
 		constructionDecayTime  = int(6.66 * GAME_SPEED);
 		constructionDecaySpeed = 0.03f;
@@ -56,17 +74,17 @@ void CModInfo::ResetState()
 		multiReclaim                   = 0;
 		reclaimMethod                  = 1;
 		reclaimUnitMethod              = 1;
-		reclaimUnitEnergyCostFactor    = 0.0f;
-		reclaimUnitEfficiency          = 1.0f;
-		reclaimFeatureEnergyCostFactor = 0.0f;
+		reclaimUnitCostFactor          = 0.0f;
+		reclaimUnitEfficiency          = {1.0f, 0.0f};
+		reclaimFeatureCostFactor       = 0.0f;
 		reclaimUnitDrainHealth         = true;
 		reclaimAllowEnemies            = true;
 		reclaimAllowAllies             = true;
 	}
 	{
-		repairEnergyCostFactor    = 0.0f;
-		resurrectEnergyCostFactor = 0.5f;
-		captureEnergyCostFactor   = 0.0f;
+		repairCostFactor    = 0.0f;
+		resurrectCostFactor = {0.0f, 0.5f};
+		captureCostFactor   = 0.0f;
 	}
 	{
 		unitExpMultiplier  = 1.0f;
@@ -118,7 +136,6 @@ void CModInfo::ResetState()
 		qtMaxNodesSearched = 8192;
 		qtRefreshPathMinDist = 512.f;
 		qtMaxNodesSearchedRelativeToMapOpenNodes = 0.25;
-		qtLowerQualityPaths = false;
 
 		enableSmoothMesh = true;
 		smoothMeshResDivider = 2;
@@ -127,9 +144,12 @@ void CModInfo::ResetState()
 
 		SLuaAllocLimit::MAX_ALLOC_BYTES = SLuaAllocLimit::MAX_ALLOC_BYTES_DEFAULT;
 
+		nativeExcessSharing = true;
 		allowTake = true;
 
 		allowEnginePlayerlist = true;
+
+		useStartPositionSelecter = true;
 	}
 	{
 		// make windChangeReportPeriod equal to EnvResourceHandler::WIND_UPDATE_RATE = 15 * GAME_SPEED;
@@ -177,7 +197,6 @@ void CModInfo::Init(const std::string& modFileName)
 		qtMaxNodesSearched = system.GetInt("qtMaxNodesSearched", qtMaxNodesSearched);
 		qtRefreshPathMinDist = system.GetFloat("qtRefreshPathMinDist", qtRefreshPathMinDist);
 		qtMaxNodesSearchedRelativeToMapOpenNodes = system.GetFloat("qtMaxNodesSearchedRelativeToMapOpenNodes", qtMaxNodesSearchedRelativeToMapOpenNodes);
-		qtLowerQualityPaths = system.GetBool("qtLowerQualityPaths", qtLowerQualityPaths);
 
 		enableSmoothMesh = system.GetBool("enableSmoothMesh", enableSmoothMesh);
 		smoothMeshResDivider = system.GetInt("smoothMeshResDivider", smoothMeshResDivider);
@@ -188,8 +207,11 @@ void CModInfo::Init(const std::string& modFileName)
 		// Specify in megabytes: 1 << 20 = (1024 * 1024)
 		SLuaAllocLimit::MAX_ALLOC_BYTES = static_cast<decltype(SLuaAllocLimit::MAX_ALLOC_BYTES)>(system.GetInt("LuaAllocLimit", SLuaAllocLimit::MAX_ALLOC_BYTES >> 20u)) << 20u;
 
+		nativeExcessSharing = system.GetBool("nativeExcessSharing", nativeExcessSharing);
 		allowTake = system.GetBool("allowTake", allowTake);
 		allowEnginePlayerlist = system.GetBool("allowEnginePlayerlist", allowEnginePlayerlist);
+
+		useStartPositionSelecter = system.GetBool("useStartPositionSelecter", useStartPositionSelecter);
 	}
 
 	{
@@ -209,6 +231,19 @@ void CModInfo::Init(const std::string& modFileName)
 		unitQuadPositionUpdateRate = movementTbl.GetInt("unitQuadPositionUpdateRate",  unitQuadPositionUpdateRate);
 		groundUnitCollisionAvoidanceUpdateRate = movementTbl.GetInt("groundUnitCollisionAvoidanceUpdateRate",  groundUnitCollisionAvoidanceUpdateRate);
 
+	}
+
+	{
+		// Guard behaviour
+		const LuaTable& guardTbl = root.SubTable("guard");
+
+		guardRecalculateThreshold = Square(guardTbl.GetFloat("guardRecalculateThreshold", guardRecalculateThreshold));
+		guardStoppedProximityGoal = Square(guardTbl.GetFloat("guardStoppedProximityGoal", guardStoppedProximityGoal));
+		guardMovingProximityGoal = Square(guardTbl.GetFloat("guardMovingProximityGoal", guardMovingProximityGoal));
+
+		guardStoppedExtraDistance = guardTbl.GetFloat("guardStoppedExtraDistance", guardStoppedExtraDistance);
+		guardMovingIntervalMultiplier = guardTbl.GetFloat("guardMovingIntervalMultiplier", guardMovingIntervalMultiplier);
+		guardInterceptionLimit = guardTbl.GetFloat("guardInterceptionLimit", guardInterceptionLimit);
 	}
 
 	{
@@ -233,9 +268,18 @@ void CModInfo::Init(const std::string& modFileName)
 		multiReclaim  = reclaimTbl.GetInt("multiReclaim",  multiReclaim);
 		reclaimMethod = reclaimTbl.GetInt("reclaimMethod", reclaimMethod);
 		reclaimUnitMethod = reclaimTbl.GetInt("unitMethod", reclaimUnitMethod);
-		reclaimUnitEnergyCostFactor = reclaimTbl.GetFloat("unitEnergyCostFactor", reclaimUnitEnergyCostFactor);
-		reclaimUnitEfficiency = reclaimTbl.GetFloat("unitEfficiency", reclaimUnitEfficiency);
-		reclaimFeatureEnergyCostFactor = reclaimTbl.GetFloat("featureEnergyCostFactor", reclaimFeatureEnergyCostFactor);
+		reclaimUnitCostFactor =
+			{                                             reclaimUnitCostFactor.metal
+			, reclaimTbl.GetFloat("unitEnergyCostFactor", reclaimUnitCostFactor.energy)
+		};
+		reclaimUnitEfficiency =
+			{ reclaimTbl.GetFloat("unitEfficiency", reclaimUnitEfficiency.metal)
+			,                                       reclaimUnitEfficiency.energy
+		};
+		reclaimFeatureCostFactor =
+			{                                                reclaimFeatureCostFactor.metal
+			, reclaimTbl.GetFloat("featureEnergyCostFactor", reclaimFeatureCostFactor.energy)
+		};
 		reclaimUnitDrainHealth = reclaimTbl.GetBool("unitDrainHealth", reclaimUnitDrainHealth);
 		reclaimAllowEnemies = reclaimTbl.GetBool("allowEnemies", reclaimAllowEnemies);
 		reclaimAllowAllies = reclaimTbl.GetBool("allowAllies", reclaimAllowAllies);
@@ -244,19 +288,28 @@ void CModInfo::Init(const std::string& modFileName)
 	{
 		// repair
 		const LuaTable& repairTbl = root.SubTable("repair");
-		repairEnergyCostFactor = repairTbl.GetFloat("energyCostFactor", repairEnergyCostFactor);
+		repairCostFactor =
+			{                                        repairCostFactor.metal
+			, repairTbl.GetFloat("energyCostFactor", repairCostFactor.energy)
+		};
 	}
 
 	{
 		// resurrect
 		const LuaTable& resurrectTbl = root.SubTable("resurrect");
-		resurrectEnergyCostFactor  = resurrectTbl.GetFloat("energyCostFactor", resurrectEnergyCostFactor);
+		resurrectCostFactor  =
+			{                                           resurrectCostFactor.metal
+			, resurrectTbl.GetFloat("energyCostFactor", resurrectCostFactor.energy)
+		};
 	}
 
 	{
 		// capture
 		const LuaTable& captureTbl = root.SubTable("capture");
-		captureEnergyCostFactor = captureTbl.GetFloat("energyCostFactor", captureEnergyCostFactor);
+		captureCostFactor =
+			{                                         captureCostFactor.metal
+			, captureTbl.GetFloat("energyCostFactor", captureCostFactor.energy)
+		};
 	}
 
 	{

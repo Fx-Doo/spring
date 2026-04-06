@@ -5,6 +5,7 @@
 #include "Rendering/Colors.h"
 #include "Rendering/Textures/TextureAtlas.h"
 #include "Rendering/GL/RenderBuffers.h"
+#include "Rendering/Env/Particles/ProjectileDrawer.h"
 #include "Sim/Projectiles/ExpGenSpawnableMemberInfo.h"
 #include "Sim/Projectiles/ProjectileHandler.h"
 #include "Sim/Misc/QuadField.h"
@@ -33,6 +34,7 @@ CR_REG_METADATA(CProjectile,
 	CR_MEMBER(deleteMe),
 
 	CR_MEMBER(drawSorted),
+	CR_MEMBER(blockPreciseCol),
 
 	CR_MEMBER_BEGINFLAG(CM_Config),
 		CR_MEMBER(castShadow),
@@ -61,8 +63,17 @@ CR_REG_METADATA(CProjectile,
 	CR_MEMBER(quads)
 ))
 
-TypedRenderBuffer<VA_TYPE_C> CProjectile::mmLnsRB = { 1 << 12, 0 };
-TypedRenderBuffer<VA_TYPE_C> CProjectile::mmPtsRB = { 1 << 14, 0 };
+// Minimap render buffers moved to CProjectileDrawer for proper lifecycle management
+
+namespace Impl {
+	float3 GetNormalizedOrDefaultDir(const float3& dir) {
+		float sqLen = dir.SqLength();
+		if unlikely(sqLen < float3::cmp_eps())
+			return FwdVector;
+
+		return dir * math::isqrt(sqLen);
+	}
+}
 
 CProjectile::CProjectile()
 	: myrange(0.0f)
@@ -88,6 +99,7 @@ CProjectile::CProjectile(
 	, myrange(/*params.weaponDef->range*/0.0f)
 	, mygravity((mapInfo != nullptr)? mapInfo->map.gravity: 0.0f)
 {
+	preFrameTra = Transform{ CQuaternion::MakeFrom(Impl::GetNormalizedOrDefaultDir(dir)), pos };
 	SetRadiusAndHeight(1.7f, 0.0f);
 	Init(owner, ZeroVector);
 }
@@ -128,6 +140,9 @@ void CProjectile::Init(const CUnit* owner, const float3& offset)
 
 	if (synced && !weapon)
 		quadField.AddProjectile(this);
+
+
+	preFrameTra = Transform{ CQuaternion::MakeFrom(Impl::GetNormalizedOrDefaultDir(dir)), pos };
 }
 
 
@@ -149,6 +164,11 @@ void CProjectile::Delete()
 	checkCol = false;
 }
 
+void CProjectile::PreUpdate()
+{
+	preFrameTra = Transform{ CQuaternion::MakeFrom(Impl::GetNormalizedOrDefaultDir(dir)), pos };
+}
+
 
 void CProjectile::DrawOnMinimap() const
 {
@@ -156,6 +176,25 @@ void CProjectile::DrawOnMinimap() const
 	AddMiniMapVertices({ pos        , color4::whiteA }, { pos + speed, color4::whiteA });
 }
 
+bool CProjectile::UpdateAnimParams()
+{
+	if (!validTextures[0])
+		return false;
+
+	if (validTextures[1])
+		UpdateAnimParamsImpl(animParams1, animProgress1);
+
+	if (validTextures[2])
+		UpdateAnimParamsImpl(animParams2, animProgress2);
+
+	if (validTextures[3])
+		UpdateAnimParamsImpl(animParams3, animProgress3);
+
+	if (validTextures[4])
+		UpdateAnimParamsImpl(animParams4, animProgress4);
+
+	return true;
+}
 
 CUnit* CProjectile::owner() const {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -189,9 +228,9 @@ bool CProjectile::GetMemberInfo(SExpGenSpawnableMemberInfo& memberInfo)
 	if (CExpGenSpawnable::GetMemberInfo(memberInfo))
 		return true;
 
-	CHECK_MEMBER_INFO_BOOL(CProjectile, castShadow)
-	CHECK_MEMBER_INFO_FLOAT3(CProjectile, dir)
-	CHECK_MEMBER_INFO_INT(CProjectile, drawOrder)
+	CHECK_MEMBER_INFO_BOOL  (CProjectile, castShadow);
+	CHECK_MEMBER_INFO_FLOAT3(CProjectile, dir       );
+	CHECK_MEMBER_INFO_INT   (CProjectile, drawOrder );
 
 	return false;
 }
@@ -206,10 +245,20 @@ void CProjectile::AddMiniMapVertices(VA_TYPE_C&& v1, VA_TYPE_C&& v2)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	if (v1.pos.equals(v2.pos)) {
-		mmPtsRB.AddVertex(std::move(v1));
+		CProjectileDrawer::GetMiniMapPointsRB().AddVertex(std::move(v1));
 	}
 	else {
-		mmLnsRB.AddVertex(std::move(v1));
-		mmLnsRB.AddVertex(std::move(v2));
+		CProjectileDrawer::GetMiniMapLinesRB().AddVertex(std::move(v1));
+		CProjectileDrawer::GetMiniMapLinesRB().AddVertex(std::move(v2));
 	}
+}
+
+TypedRenderBuffer<VA_TYPE_C>& CProjectile::GetMiniMapLinesRB()
+{
+	return CProjectileDrawer::GetMiniMapLinesRB();
+}
+
+TypedRenderBuffer<VA_TYPE_C>& CProjectile::GetMiniMapPointsRB()
+{
+	return CProjectileDrawer::GetMiniMapPointsRB();
 }

@@ -486,30 +486,49 @@ struct FramebufferData
 
 enum class FramebufferAttachment
 {
-	None, Depth, DepthStencil
+	None, DepthStencil
 };
 
-static void CheckGLError(const char* operation_name)
-{
+struct CheckGLToken {
+	CheckGLToken(const CheckGLToken&) = delete;
+	CheckGLToken(CheckGLToken&&) noexcept = delete;
+	CheckGLToken& operator=(const CheckGLToken&) = delete;
+	CheckGLToken& operator=(CheckGLToken&&) noexcept = delete;
+
+	CheckGLToken(const char* operation_name)
+		: opn{ operation_name }
+	{
 #ifdef RMLUI_DEBUG
-	GLenum error_code = glGetError();
-	if (error_code != GL_NO_ERROR) {
-		static const Rml::Pair<GLenum, const char*> error_names[] = {{GL_INVALID_ENUM,      "GL_INVALID_ENUM"},
-																	 {GL_INVALID_VALUE,     "GL_INVALID_VALUE"},
-																	 {GL_INVALID_OPERATION, "GL_INVALID_OPERATION"},
-																	 {GL_OUT_OF_MEMORY,     "GL_OUT_OF_MEMORY"}};
-		const char* error_str = "''";
-		for (auto& err: error_names) {
-			if (err.first == error_code) {
-				error_str = err.second;
-				break;
-			}
-		}
-		Rml::Log::Message(Rml::Log::LT_ERROR, "OpenGL error during %s. Error code 0x%x (%s).", operation_name,
-						  error_code, error_str);
-	}
+		for (int count = 0; (glGetError() != GL_NO_ERROR) && (count < 10000); count++);
 #endif
-	(void) operation_name;
+	}
+	~CheckGLToken() {
+#ifdef RMLUI_DEBUG
+		GLenum error_code = glGetError();
+		if (error_code != GL_NO_ERROR) {
+			static const Rml::Pair<GLenum, const char*> error_names[] = { {GL_INVALID_ENUM,      "GL_INVALID_ENUM"},
+																		 {GL_INVALID_VALUE,     "GL_INVALID_VALUE"},
+																		 {GL_INVALID_OPERATION, "GL_INVALID_OPERATION"},
+																		 {GL_OUT_OF_MEMORY,     "GL_OUT_OF_MEMORY"} };
+			const char* error_str = "''";
+			for (auto& err : error_names) {
+				if (err.first == error_code) {
+					error_str = err.second;
+					break;
+				}
+			}
+			Rml::Log::Message(Rml::Log::LT_ERROR, "OpenGL error during %s. Error code 0x%x (%s).", opn,
+				error_code, error_str);
+		}
+#endif
+	}
+private:
+	const char* opn = nullptr;
+};
+
+[[nodiscard]] static CheckGLToken CheckGLError(const char* operation_name)
+{
+	return CheckGLToken(operation_name);
 }
 
 static bool CreateFramebuffer(
@@ -518,6 +537,8 @@ static bool CreateFramebuffer(
 	GLuint shared_depth_stencil_buffer
 )
 {
+	auto tok = Gfx::CheckGLError("CreateFramebuffer");
+
 #ifdef RMLUI_PLATFORM_EMSCRIPTEN
 	constexpr GLint wrap_mode = GL_CLAMP_TO_EDGE;
 #else
@@ -525,7 +546,7 @@ static bool CreateFramebuffer(
 #endif
 
 	constexpr GLenum color_format = GL_RGBA8;   // GL_RGBA8 GL_SRGB8_ALPHA8 GL_RGBA16F
-	constexpr GLint min_mag_filter = GL_LINEAR; // GL_NEAREST
+	constexpr GLint min_mag_filter = GL_NEAREST; // GL_NEAREST
 	const Rml::Colourf border_color(0.f, 0.f);
 
 	GLuint framebuffer = 0;
@@ -588,8 +609,6 @@ static bool CreateFramebuffer(
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glBindTexture(GL_TEXTURE_2D, 0);
 	glBindRenderbuffer(GL_RENDERBUFFER, 0);
-
-	CheckGLError("CreateFramebuffer");
 
 	out_fb = {};
 	out_fb.width = width;
@@ -687,16 +706,19 @@ RenderInterface_GL3_Recoil::~RenderInterface_GL3_Recoil()
 	}
 }
 
-void RenderInterface_GL3_Recoil::SetViewport(int width, int height)
+void RenderInterface_GL3_Recoil::SetViewport(int width, int height, int offset_x, int offset_y)
 {
 	viewport_width = Rml::Math::Max(width, 1);
 	viewport_height = Rml::Math::Max(height, 1);
+	viewport_offset_x = offset_x;
+	viewport_offset_y = offset_y;
 	projection = Rml::Matrix4f::ProjectOrtho(0, (float) viewport_width, (float) viewport_height, 0, -10000, 10000);
 }
 
 void RenderInterface_GL3_Recoil::BeginFrame()
 {
-	RMLUI_ASSERT(viewport_width >= 1 && viewport_height >= 1)
+	RMLUI_ASSERT(viewport_width >= 1 && viewport_height >= 1);
+	auto tok = Gfx::CheckGLError("BeginFrame");
 
 	// Backup GL state.
 	glstate_backup.enable_cull_face = glIsEnabled(GL_CULL_FACE);
@@ -761,6 +783,8 @@ void RenderInterface_GL3_Recoil::BeginFrame()
 	glStencilMask(GLuint(-1));
 	glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 
+	glDisable(GL_DEPTH_TEST);
+
 	SetTransform(nullptr);
 
 	render_layers.BeginFrame(viewport_width, viewport_height);
@@ -770,12 +794,12 @@ void RenderInterface_GL3_Recoil::BeginFrame()
 	UseProgram(ProgramId::None);
 	program_transform_dirty.set();
 	scissor_state = Rml::Rectanglei::MakeInvalid();
-
-	Gfx::CheckGLError("BeginFrame");
 }
 
 void RenderInterface_GL3_Recoil::EndFrame()
 {
+	auto tok = Gfx::CheckGLError("EndFrame");
+
 	const Gfx::FramebufferData& fb_active = render_layers.GetTopLayer();
 	const Gfx::FramebufferData& fb_postprocess = render_layers.GetPostprocessPrimary();
 
@@ -788,6 +812,7 @@ void RenderInterface_GL3_Recoil::EndFrame()
 
 	// Draw to backbuffer
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glViewport(viewport_offset_x, viewport_offset_y, viewport_width, viewport_height);
 
 	// Assuming we have an opaque background, we can just write to it with the premultiplied alpha blend mode and we'll get the correct result.
 	// Instead, if we had a transparent destination that didn't use premultiplied alpha, we would need to perform a manual un-premultiplication step.
@@ -855,8 +880,6 @@ void RenderInterface_GL3_Recoil::EndFrame()
 	glStencilMaskSeparate(GL_BACK, glstate_backup.stencil_back.writemask);
 	glStencilOpSeparate(GL_BACK, glstate_backup.stencil_back.fail, glstate_backup.stencil_back.pass_depth_fail,
 						glstate_backup.stencil_back.pass_depth_pass);
-
-	Gfx::CheckGLError("EndFrame");
 }
 
 void RenderInterface_GL3_Recoil::Clear()
@@ -900,6 +923,8 @@ RenderInterface_GL3_Recoil::CompileGeometry(Rml::Span<const Rml::Vertex> vertice
 void RenderInterface_GL3_Recoil::RenderGeometry(Rml::CompiledGeometryHandle handle, Rml::Vector2f translation,
 												Rml::TextureHandle texture)
 {
+	auto tok = Gfx::CheckGLError("RenderCompiledGeometry");
+
 	auto* geometry = (Gfx::CompiledGeometryData*) handle;
 
 	if (texture == TexturePostprocess) {
@@ -918,13 +943,11 @@ void RenderInterface_GL3_Recoil::RenderGeometry(Rml::CompiledGeometryHandle hand
 	geometry->vao->Bind();
 	glDrawElements(GL_TRIANGLES, geometry->num_indices, GL_UNSIGNED_INT, nullptr);
 	geometry->vao->Unbind();
-	
+
 	if (texture != TexturePostprocess) {
 		UseProgram(ProgramId::None);
 		glBindTexture(GL_TEXTURE_2D, 0);
 	}
-
-	Gfx::CheckGLError("RenderCompiledGeometry");
 }
 
 void RenderInterface_GL3_Recoil::ReleaseGeometry(Rml::CompiledGeometryHandle handle)
@@ -952,6 +975,8 @@ static Rml::Rectanglei VerticallyFlipped(Rml::Rectanglei rect, int viewport_heig
 
 void RenderInterface_GL3_Recoil::SetScissor(Rml::Rectanglei region, bool vertically_flip)
 {
+	auto tok = Gfx::CheckGLError("SetScissorRegion");
+
 	if (region.Valid() != scissor_state.Valid()) {
 		if (region.Valid())
 			glEnable(GL_SCISSOR_TEST);
@@ -970,7 +995,6 @@ void RenderInterface_GL3_Recoil::SetScissor(Rml::Rectanglei region, bool vertica
 		glScissor(x, y, region.Width(), region.Height());
 	}
 
-	Gfx::CheckGLError("SetScissorRegion");
 	scissor_state = region;
 }
 
@@ -1001,35 +1025,34 @@ RenderInterface_GL3_Recoil::RenderToClipMask(Rml::ClipMaskOperation operation, R
 	RMLUI_ASSERT(glIsEnabled(GL_STENCIL_TEST))
 	using Rml::ClipMaskOperation;
 
-	const bool clear_stencil = (operation == ClipMaskOperation::Set || operation == ClipMaskOperation::SetInverse);
-	if (clear_stencil) {
-		// @performance Increment the reference value instead of clearing each time.
-		glClear(GL_STENCIL_BUFFER_BIT);
-	}
-
-	GLint stencil_test_value = 0;
-	glGetIntegerv(GL_STENCIL_REF, &stencil_test_value);
-
-	glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-	glStencilFunc(GL_ALWAYS, GLint(1), GLuint(-1));
+	GLint stencil_write_value = 1;
+	GLint stencil_test_value = 1;
 
 	switch (operation) {
 		case ClipMaskOperation::Set: {
+			// @performance Increment the reference value instead of clearing each time.
+			glClear(GL_STENCIL_BUFFER_BIT);
 			glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
-			stencil_test_value = 1;
 		}
 			break;
 		case ClipMaskOperation::SetInverse: {
+			glClearStencil(1);
+			glClear(GL_STENCIL_BUFFER_BIT);
+			glClearStencil(0);
 			glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
-			stencil_test_value = 0;
+			stencil_write_value = 0;
 		}
 			break;
 		case ClipMaskOperation::Intersect: {
 			glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
+			glGetIntegerv(GL_STENCIL_REF, &stencil_test_value);
 			stencil_test_value += 1;
 		}
 			break;
 	}
+
+	glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+	glStencilFunc(GL_ALWAYS, stencil_write_value, GLuint(-1));
 
 	RenderGeometry(geometry, translation, {});
 
@@ -1065,8 +1088,8 @@ RenderInterface_GL3_Recoil::GenerateTexture(Rml::Span<const Rml::byte> source_da
 
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, source_dimensions.x, source_dimensions.y, 0, GL_RGBA, GL_UNSIGNED_BYTE,
 				 source_data.data());
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -1154,6 +1177,8 @@ void RenderInterface_GL3_Recoil::RenderBlur(float sigma, const Gfx::FramebufferD
 	RMLUI_ASSERT(&source_destination != &temp && source_destination.width == temp.width &&
 				 source_destination.height == temp.height)
 	RMLUI_ASSERT(window_flipped.Valid())
+
+	auto tok = Gfx::CheckGLError("Blur");
 
 	int pass_level = 0;
 	SigmaToParameters(sigma, pass_level, sigma);
@@ -1256,8 +1281,6 @@ void RenderInterface_GL3_Recoil::RenderBlur(float sigma, const Gfx::FramebufferD
 
 	// Restore render state.
 	SetScissor(original_scissor);
-
-	Gfx::CheckGLError("Blur");
 }
 
 void RenderInterface_GL3_Recoil::ReleaseTexture(Rml::TextureHandle texture_handle)
@@ -1478,6 +1501,8 @@ void RenderInterface_GL3_Recoil::RenderShader(Rml::CompiledShaderHandle shader_h
 											  Rml::Vector2f translation, Rml::TextureHandle /*texture*/)
 {
 	RMLUI_ASSERT(shader_handle && geometry_handle)
+
+	auto tok = Gfx::CheckGLError("RenderShader");
 	const CompiledShader& shader = *reinterpret_cast<CompiledShader*>(shader_handle);
 	const CompiledShaderType type = shader.type;
 	const auto* geometry = (Gfx::CompiledGeometryData*) geometry_handle;
@@ -1519,8 +1544,6 @@ void RenderInterface_GL3_Recoil::RenderShader(Rml::CompiledShaderHandle shader_h
 		}
 			break;
 	}
-
-	Gfx::CheckGLError("RenderShader");
 }
 
 void RenderInterface_GL3_Recoil::ReleaseShader(Rml::CompiledShaderHandle shader_handle)
@@ -1542,6 +1565,8 @@ void RenderInterface_GL3_Recoil::BlitLayerToPostprocessPrimary(Rml::LayerHandle 
 
 void RenderInterface_GL3_Recoil::RenderFilters(Rml::Span<const Rml::CompiledFilterHandle> filter_handles)
 {
+	auto tok = Gfx::CheckGLError("RenderFilter");
+
 	for (const Rml::CompiledFilterHandle filter_handle: filter_handles) {
 		const CompiledFilter& filter = *reinterpret_cast<const CompiledFilter*>(filter_handle);
 		const FilterType type = filter.type;
@@ -1652,8 +1677,6 @@ void RenderInterface_GL3_Recoil::RenderFilters(Rml::Span<const Rml::CompiledFilt
 				break;
 		}
 	}
-
-	Gfx::CheckGLError("RenderFilter");
 }
 
 Rml::LayerHandle RenderInterface_GL3_Recoil::PushLayer()
@@ -1671,6 +1694,8 @@ void RenderInterface_GL3_Recoil::CompositeLayers(Rml::LayerHandle source_handle,
 												 Rml::Span<const Rml::CompiledFilterHandle> filters)
 {
 	using Rml::BlendMode;
+
+	auto tok = Gfx::CheckGLError("CompositeLayers");
 
 	// Blit source layer to postprocessing buffer. Do this regardless of whether we actually have any filters to be
 	// applied, because we need to resolve the multi-sampled framebuffer in any case.
@@ -1696,8 +1721,6 @@ void RenderInterface_GL3_Recoil::CompositeLayers(Rml::LayerHandle source_handle,
 
 	if (destination_handle != render_layers.GetTopLayerHandle())
 		glBindFramebuffer(GL_FRAMEBUFFER, render_layers.GetTopLayer().framebuffer);
-
-	Gfx::CheckGLError("CompositeLayers");
 }
 
 void RenderInterface_GL3_Recoil::PopLayer()
@@ -1708,6 +1731,8 @@ void RenderInterface_GL3_Recoil::PopLayer()
 
 Rml::TextureHandle RenderInterface_GL3_Recoil::SaveLayerAsTexture()
 {
+	auto tok = Gfx::CheckGLError("SaveLayerAsTexture");
+
 	RMLUI_ASSERT(scissor_state.Valid());
 	const Rml::Rectanglei bounds = scissor_state;
 
@@ -1723,7 +1748,7 @@ Rml::TextureHandle RenderInterface_GL3_Recoil::SaveLayerAsTexture()
 	const Gfx::FramebufferData& destination = render_layers.GetPostprocessSecondary();
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, source.framebuffer);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, destination.framebuffer);
-	
+
 	// Flip the image vertically, as that convention is used for textures, and move to origin.
 	glBlitFramebuffer(                                  //
 		bounds.Left(), source.height - bounds.Bottom(), // src0
@@ -1741,13 +1766,14 @@ Rml::TextureHandle RenderInterface_GL3_Recoil::SaveLayerAsTexture()
 
 	SetScissor(bounds);
 	glBindFramebuffer(GL_FRAMEBUFFER, render_layers.GetTopLayer().framebuffer);
-	Gfx::CheckGLError("SaveLayerAsTexture");
 
 	return render_texture;
 }
 
 Rml::CompiledFilterHandle RenderInterface_GL3_Recoil::SaveLayerAsMaskImage()
 {
+	auto tok = Gfx::CheckGLError("SaveLayerAsMaskImage");
+
 	BlitLayerToPostprocessPrimary(render_layers.GetTopLayerHandle());
 
 	const Gfx::FramebufferData& source = render_layers.GetPostprocessPrimary();
@@ -1762,7 +1788,6 @@ Rml::CompiledFilterHandle RenderInterface_GL3_Recoil::SaveLayerAsMaskImage()
 
 	glEnable(GL_BLEND);
 	glBindFramebuffer(GL_FRAMEBUFFER, render_layers.GetTopLayer().framebuffer);
-	Gfx::CheckGLError("SaveLayerAsMaskImage");
 
 	CompiledFilter filter = {};
 	filter.type = FilterType::MaskImage;
@@ -1791,6 +1816,8 @@ int RenderInterface_GL3_Recoil::GetUniformLocation(const char* name) const
 void RenderInterface_GL3_Recoil::SubmitTransformUniform(Rml::Vector2f translation)
 {
 	static_assert((size_t) ProgramId::Count < MaxNumPrograms, "Maximum number of programs exceeded.");
+	auto tok = Gfx::CheckGLError("SubmitTransformUniform");
+
 	const auto program_index = (size_t) active_program_id;
 	auto program = program_data->programs[active_program_id];
 
@@ -1800,8 +1827,6 @@ void RenderInterface_GL3_Recoil::SubmitTransformUniform(Rml::Vector2f translatio
 	}
 
 	program->SetUniform(Uniform::Translate, translation.x, translation.y);
-
-	Gfx::CheckGLError("SubmitTransformUniform");
 }
 
 RenderInterface_GL3_Recoil::operator bool() const

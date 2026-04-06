@@ -192,7 +192,7 @@ void CGameServer::Initialize()
 		netPingTimings.fill(spring_notime);
 		mapDrawTimings.fill({spring_notime, 0});
 		chatMutedFlags.fill({false, false});
-		aiControlFlags.fill(false);
+		aiControlFlags.fill(true);
 
 		const std::vector<PlayerBase>& playerStartData = myGameSetup->GetPlayerStartingDataCont();
 		const std::vector<TeamBase>&     teamStartData = myGameSetup->GetTeamStartingDataCont();
@@ -588,7 +588,7 @@ void CGameServer::PrivateMessage(int playerNum, const std::string& message) {
 void CGameServer::CheckSync()
 {
 #ifdef SYNCCHECK
-	std::vector< std::pair<unsigned, unsigned> > checksums; // <response checkum, #clients matching checksum>
+	std::vector< std::pair<unsigned, unsigned> > checksums; // <response checksum, #clients matching checksum>
 	std::vector<int> noSyncResponsePlayers;
 
 	std::map<unsigned, std::vector<int> > desyncGroups; // <desync-checksum, [desynced players]>
@@ -734,7 +734,7 @@ void CGameServer::CheckSync()
 				if (!desyncHasOccurred) {
 					if (globalConfig.dumpGameStateOnDesync) {
 						LOG("Desync detected. Requesting all clients to collect game state information.");
-						Broadcast(CBaseNetProtocol::Get().SendGameStateDump());
+						Broadcast(CBaseNetProtocol::Get().SendGameStateDump(syncErrorFrame));
 					}
 					desyncHasOccurred = true;
 				}
@@ -795,7 +795,7 @@ float CGameServer::GetDemoTime() const {
 
 void CGameServer::Update()
 {
-	const float tdif = spring_tomsecs(spring_gettime() - lastUpdate) * 0.001f;
+	const float tdif = (spring_gettime() - lastUpdate).toSecsf();
 
 	gameTime += tdif;
 	lastUpdate = spring_gettime();
@@ -2718,10 +2718,11 @@ void CGameServer::UpdateLoop()
 		Threading::SetAffinity(~0);
 
 		while (!quitServer) {
-			spring_msecs(loopSleepTime).sleep(true);
 
 			if (udpListener != nullptr)
-				udpListener->Update();
+				udpListener->Update(loopSleepTime);
+			else
+				spring_msecs(loopSleepTime).sleep(true);
 
 			std::lock_guard<spring::recursive_mutex> scoped_lock(gameServerMutex);
 			ServerReadNet();

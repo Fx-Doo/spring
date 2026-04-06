@@ -3,7 +3,6 @@
 #include "CollisionHandler.h"
 #include "CollisionVolume.h"
 #include "Map/ReadMap.h" // mapDims
-#include "Rendering/Models/3DModel.h"
 #include "Sim/Misc/GroundBlockingObjectMap.h"
 #include "Sim/Misc/GlobalConstants.h"
 #include "Sim/Objects/SolidObject.h"
@@ -120,7 +119,7 @@ bool CCollisionHandler::CollisionFootPrint(const CSolidObject* o, const float3& 
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	// If the object isn't marked on blocking map, or if it is flying,
-	// effecively only the early-out sphere check  is performed (which
+	// effectively only the early-out sphere check  is performed (which
 	// we already passed).
 	if (!o->IsBlocking())
 		return false;

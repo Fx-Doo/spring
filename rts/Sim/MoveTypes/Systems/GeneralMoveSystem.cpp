@@ -22,6 +22,7 @@ using namespace MoveTypes;
 void GeneralMoveSystem::Init() {
     RECOIL_DETAILED_TRACY_ZONE;
     CMoveMath::InitRangeIsBlockedHashes();
+    Sim::systemUtils.OnPostLoad().connect<&CMoveMath::InitRangeIsBlockedHashes>();
 }
 
 void GeneralMoveSystem::Update() {
@@ -36,8 +37,6 @@ void GeneralMoveSystem::Update() {
             #ifndef NDEBUG
             unit->SanityCheck();
             #endif
-
-			unit->PreUpdate();
 
             if (moveType->Update())
                 eventHandler.UnitMoved(unit);
@@ -54,4 +53,6 @@ void GeneralMoveSystem::Update() {
 	}
 }
 
-void GeneralMoveSystem::Shutdown() {}
+void GeneralMoveSystem::Shutdown() {
+    Sim::systemUtils.OnPostLoad().disconnect<&CMoveMath::InitRangeIsBlockedHashes>();
+}

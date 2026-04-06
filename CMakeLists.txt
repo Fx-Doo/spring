@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.27)
-cmake_policy(SET CMP0060 OLD) #causes link errors on Linux otherwise
-cmake_policy(SET CMP0065 OLD) #we need binaries compiled with -rdynamic for BARb to work (cause unknown https://github.com/beyond-all-reason/spring/issues/405)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_MODULES_SPRING "${CMAKE_CURRENT_SOURCE_DIR}/rts/build/cmake")
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_MODULES_SPRING}")
@@ -10,7 +12,12 @@ set(CMAKE_USER_MAKE_RULES_OVERRIDE "${CMAKE_MODULES_SPRING}/OverrideFlags.cmake"
 
 project(Spring)
 
-add_definitions(-DFMT_HEADER_ONLY) #for fmt lib
+# Force Unicode WinAPI
+if (WIN32)
+	add_definitions(-DUNICODE -D_UNICODE)
+endif()
+
+find_package(Threads REQUIRED)
 
 option(INSTALL_PORTABLE "Make a portable installation (instead of regular system installation)" TRUE)
 
@@ -72,7 +79,7 @@ else()
 	set(JAVA_COMPILE_FLAG_CONDITIONAL "-g:lines,source")
 endif()
 
-# By default, the libraries that don't explicily specify SHARED/STATIC are build statically.
+# By default, the libraries that don't explicitly specify SHARED/STATIC are build statically.
 # See https://cmake.org/cmake/help/latest/variable/BUILD_SHARED_LIBS.html
 option(BUILD_SHARED_LIBS "Build shared (dynamic) libraries" OFF)
 
@@ -103,8 +110,19 @@ set(MARCH_FLAG ${MARCH} CACHE STRING "CPU optimization (use `generic` for generi
 if    (CMAKE_SIZEOF_VOID_P EQUAL 8)
 	set(MARCH_BITS 64 CACHE INTERNAL "" FORCE)
 else  (CMAKE_SIZEOF_VOID_P EQUAL 8)
-	set(MARCH_BITS 32 CACHE INTERNAL "" FORCE)
+	message(FATAL_ERROR "RecoilEngine does not support 32 bits." )
 endif (CMAKE_SIZEOF_VOID_P EQUAL 8)
+
+# Detect architecture
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64|armv8|ARM64|AARCH64")
+	set(IS_ARM64_BUILD TRUE)
+	message(STATUS "Detected ARM64 architecture: ${CMAKE_SYSTEM_PROCESSOR}")
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+	set(IS_ARM64_BUILD FALSE)
+	message(STATUS "Detected x86-64 architecture: ${CMAKE_SYSTEM_PROCESSOR}")
+else()
+	message(FATAL_ERROR "Unsupported architecture: ${CMAKE_SYSTEM_PROCESSOR}. Only ARM64 and x86-64 are supported.")
+endif()
 
 message(STATUS "Building Spring on ${MARCH_BITS}bit environment")
 set(BUILD_BITS "${MARCH_BITS}" CACHE STRING "Target arch machine type")
@@ -138,17 +156,9 @@ else  (UNIX AND NOT MINGW)
 		if (DEFINED ENV{MINGWLIBS})
 			set(MINGWLIBS $ENV{MINGWLIBS} CACHE PATH "Location of the mingwlibs package")
 		elseif(MSVC)
-			if(BUILD_BITS EQUAL 32)
-				set(MINGWLIBS ${CMAKE_SOURCE_DIR}/vclibs CACHE PATH "Location of the vclibs package")
-			else(BUILD_BITS EQUAL 32)
-				set(MINGWLIBS ${CMAKE_SOURCE_DIR}/vclibs64 CACHE PATH "Location of the vclibs package")
-			endif(BUILD_BITS EQUAL 32)
+			set(MINGWLIBS ${CMAKE_SOURCE_DIR}/vclibs64 CACHE PATH "Location of the vclibs package")
 		else()
-			if(BUILD_BITS EQUAL 32)
-				set(MINGWLIBS ${CMAKE_SOURCE_DIR}/mingwlibs CACHE PATH "Location of the mingwlibs package")
-			else(BUILD_BITS EQUAL 32)
-				set(MINGWLIBS ${CMAKE_SOURCE_DIR}/mingwlibs64 CACHE PATH "Location of the mingwlibs package")
-			endif(BUILD_BITS EQUAL 32)
+			set(MINGWLIBS ${CMAKE_SOURCE_DIR}/mingwlibs64 CACHE PATH "Location of the mingwlibs package")
 		endif()
 	endif ()
 	if    (EXISTS "${MINGWLIBS}" AND IS_DIRECTORY "${MINGWLIBS}")
@@ -177,7 +187,7 @@ else  (UNIX AND NOT MINGW)
 	endif ()
 
 
-	add_definitions(-D_WIN32_WINNT=0x0601) ## Win7 is minimum due to cpuid processor group affinity
+	add_definitions(-D_WIN32_WINNT=0x0601) ## Win7 is minimum due to processor group affinity
 	add_definitions(-D__USE_MINGW_ANSI_STDIO=1) ## use __mingw_sprintf instead of __builtin_sprintf (it's used by lua in a synced way, and builtin doesn't sync)
 
 	if(${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
@@ -189,6 +199,9 @@ else  (UNIX AND NOT MINGW)
 		add_definitions(-D_ENABLE_EXTENDED_ALIGNED_STORAGE)
 		add_definitions(-DNOMINMAX -DWIN32_LEAN_AND_MEAN)
 		add_compile_options(/bigobj)
+		add_compile_options(/utf-8) ## new FMT refuses to compile w/o it
+		add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/Zc:__cplusplus>) ## define __cplusplus value properly / https://learn.microsoft.com/en-us/cpp/build/reference/zc-cplusplus?view=msvc-170
+		add_definitions(-D_ITERATOR_DEBUG_LEVEL=0) ## attempt to make debug MSVC builds faster
 		#set(EXE_FLAGS WIN32)
 	endif()
 endif (UNIX AND NOT MINGW)
@@ -246,6 +259,12 @@ if    (SYNCCHECK)
 	add_definitions(-DSYNCCHECK)
 endif (SYNCCHECK)
 
+option(SYNC_HISTORY "Save sync history (for semidebug builds)" FALSE)
+set(SYNC_HISTORY ON CACHE BOOL "Force enable save sync history" FORCE)
+if    (SYNC_HISTORY)
+	add_definitions(-DSYNC_HISTORY)
+endif (SYNC_HISTORY)
+
 option(NO_CREG "Disable creg support" FALSE)
 if    (NO_CREG)
 	add_definitions(-DNOT_USING_CREG)
@@ -269,14 +288,19 @@ if    (WIN32)
 	endif(NOT MSVC)
 endif (WIN32)
 
-option(USE_ASAN "Build/link with address sanitizer enabled (for DEBUG builds only)" FALSE)
+option(USE_ASAN "Build/link with address sanitizer enabled" FALSE)
 if    (USE_ASAN)
 	if (UNIX AND NOT MINGW)
-		add_compile_options("$<$<CONFIG:DEBUG>:-fsanitize=address>")
-		add_link_options("$<$<CONFIG:DEBUG>:-fsanitize=address>")
+		# -fsanitize=address: Enable AddressSanitizer for detecting memory errors
+		# -fPIC: Position Independent Code required for shared libraries with ASAN
+		# -fno-omit-frame-pointer: Keep frame pointers for better stack traces in error reports
+		# -fno-optimize-sibling-calls: Prevent tail call optimization to preserve full call chains
+		# -O2: Use moderate optimization for better ASAN error detection and reasonable performance
+		add_compile_options("-fsanitize=address" "-fPIC" "-fno-omit-frame-pointer" "-fno-optimize-sibling-calls" "-O2")
+		add_link_options("-fsanitize=address")
 	endif (UNIX AND NOT MINGW)
 	if (MSVC)
-		add_compile_options("$<$<CONFIG:DEBUG>:/fsanitize=address>")
+		add_compile_options("/fsanitize=address")
 	endif (MSVC)
 endif (USE_ASAN)
 
@@ -311,10 +335,15 @@ else   (UNIX)
 	include_directories("${COREFOUNDATION_LIBRARY}/Headers")
 endif  (WIN32)
 
-find_package(Valgrind)
-if    (VALGRIND_FOUND)
-	add_definitions(-DUSE_VALGRIND)
-endif (VALGRIND_FOUND)
+option(USE_VALGRIND "Try to support Valgrind" FALSE)
+if    (USE_VALGRIND)
+	find_package(Valgrind)
+	if    (VALGRIND_FOUND)
+		add_definitions(-DUSE_VALGRIND)
+	else  (VALGRIND_FOUND)
+		message(SEND_ERROR "USE_VALGRIND is requested, but Valgrind is not found")
+	endif (VALGRIND_FOUND)
+endif (USE_VALGRIND)
 
 include (CheckSymbolExists)
 check_symbol_exists(strnlen string.h HAVE_STRNLEN)
@@ -362,13 +391,6 @@ else  (LDGOLD_FOUND)
 	message(WARNING "You are using ld.bfd, it's much slower than ld.gold.")
 endif (LDGOLD_FOUND)
 
-message(STATUS "Compiling with C++20")
-if(MSVC)
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++20 /permissive- /Zc:__cplusplus")
-else (MSVC)
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20")
-endif(MSVC)
-
 add_definitions(-D_GLIBCXX_USE_NANOSLEEP) # issue in std::chrono with gentoo and few other distros
 
 
@@ -387,6 +409,10 @@ if(NOT MSVC)
 		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsignaling-nans")
 	endif()
 
+	## warning: space between quotes and suffix is deprecated in C++23
+	## [[nodiscard]] constexpr uint32_t operator"" _hs(const char* str, std::size_t) noexcept
+	## it's been quite annoying since we switched to C++23
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-literal-operator")
 
 	### CompileTime Warnings
 	set(COMMON_WARNINGS "${COMMON_WARNINGS} -Wformat -Wformat-security")
@@ -413,14 +439,26 @@ endif()
 option(ENABLE_STREFLOP "build Spring with streflop support (REQUIRED FOR MULTIPLAYER)" TRUE)
 
 if (ENABLE_STREFLOP)
-## note: is removed in ./AI/CMakeLists.txt since it would break AI compilation
-add_definitions(-DSTREFLOP_SSE)
+	set(STREFLOP_AUTO ON CACHE BOOL "Enable STREFLOP autodetection" FORCE)
 else ()
-add_definitions(-DNOT_USING_STREFLOP)
+	add_definitions(-DNOT_USING_STREFLOP)
 endif ()
 
 ### Asio
 add_definitions(-DASIO_STANDALONE)
+
+### sse2neon
+if (IS_ARM64_BUILD)
+	add_definitions(-DSSE2NEON)
+	add_definitions(-DSSE2NEON_SUPPRESS_WARNINGS)
+
+#   These are mentioned by sse2neon docs, do *not* use them. They will cause desyncs!
+#	add_definitions(-DSSE2NEON_PRECISE_MINMAX)
+#	add_definitions(-DSSE2NEON_PRECISE_DIV)
+#	add_definitions(-DSSE2NEON_PRECISE_SQRT)
+#	add_definitions(-DSSE2NEON_PRECISE_DP)
+endif()
+
 
 ### compiler specific flags
 set(CXX_FLAGS_DEBUG_ADDITIONAL "")
@@ -439,6 +477,8 @@ if (CMAKE_COMPILER_IS_GNUCXX)
 
 	if (NOT MARCH_FLAG STREQUAL "generic")
 		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=${MARCH_FLAG} -mtune=${MARCH_FLAG}") #march/mtune define SSE flags
+	elseif (IS_ARM64_BUILD)
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=armv8-a+simd ${FP_CONTRACT_FLAG}")
 	else (NOT MARCH_FLAG STREQUAL "generic")
 		set(FALLBACK_SSE_FLAGS "-msse")
 		#set(FALLBACK_SSE_FLAGS "${FALLBACK_SSE_FLAGS} -mmmx")
@@ -461,12 +501,26 @@ if (CMAKE_COMPILER_IS_GNUCXX)
 		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=${FALLBACK_MARCH} -mtune=generic ${FALLBACK_SSE_FLAGS}")
 	endif (NOT MARCH_FLAG STREQUAL "generic")
 
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SSE_FLAGS} -mfpmath=sse") #SSE_FLAGS are now user input only
+	if (NOT IS_ARM64_BUILD)
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SSE_FLAGS} -mfpmath=sse") #SSE_FLAGS are now user input only
+	endif ()
 elseif (MSVC)
 	set(MSVC_CXX_FLAGS "/arch:SSE2") #default, but still set explicitly
 	# silence warnings
 	add_definitions(-D_SILENCE_STDEXT_HASH_DEPRECATION_WARNINGS)
-else   (MSVC)
+elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
+	# Clang on ARM64: no SSE flags needed, use armv8-a with NEON SIMD
+	if (IS_ARM64_BUILD)
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${FP_CONTRACT_FLAG}")
+	else()
+		# Clang on x86_64: use SSE like GCC
+		if (NOT MARCH_FLAG OR MARCH_FLAG STREQUAL "" OR MARCH_FLAG STREQUAL "generic")
+			set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse -mfpmath=sse")
+		else()
+			set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=${MARCH_FLAG} -mtune=${MARCH_FLAG}")
+		endif()
+	endif()
+else()
 	message(WARNING "unknown compiler")
 endif (CMAKE_COMPILER_IS_GNUCXX)
 
@@ -490,8 +544,14 @@ if    (MSVC)
 	set(CMAKE_CXX_FLAGS_PROFILE               "${CMAKE_CXX_FLAGS_PROFILE} /LTCG")
 else  (MSVC)
 	if (CMAKE_COMPILER_IS_GNUCXX)
+		# -fsingle-precision-constant: treat FP constants as float, not double (GCC-only)
+		# -frounding-math: honor runtime rounding mode (GCC-only)
 		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsingle-precision-constant -frounding-math")
-	endif(CMAKE_COMPILER_IS_GNUCXX)
+	elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
+		# Clang does not support -fsingle-precision-constant.
+		# -frounding-math is supported on Clang 14+; use it if available.
+		check_and_add_flags(CMAKE_CXX_FLAGS "-frounding-math")
+	endif()
 	# Experiment with frame pointers to see whether it improves the quality of the stack unwinds.
 	# We're having trouble getting meaningful information form crash reports. Trying this before
 	# moving onto more performance-impacting methods.
@@ -581,11 +641,28 @@ set_source_files_properties(
 	PROPERTIES GENERATED TRUE
 )
 
-# This is always executed (on every run of "make"),
-# but the actual version files are only written in case of a change
-# in the version info they use, or in the template file content.
-add_custom_target(generateVersionFiles)
-add_custom_command(TARGET generateVersionFiles
+# Find git metadata files to depend on, so version regenerates when commits change
+if(EXISTS "${CMAKE_SOURCE_DIR}/.git")
+	if(EXISTS "${CMAKE_SOURCE_DIR}/.git/index")
+		list(APPEND VERSION_GIT_DEPS "${CMAKE_SOURCE_DIR}/.git/index")
+	endif()
+	if(EXISTS "${CMAKE_SOURCE_DIR}/.git/HEAD")
+		list(APPEND VERSION_GIT_DEPS "${CMAKE_SOURCE_DIR}/.git/HEAD")
+	endif()
+endif()
+
+# Declare template files as inputs (for proper dependency tracking)
+set(VERSION_TEMPLATE_FILES
+	"${CMAKE_SOURCE_DIR}/rts/System/VersionGenerated.h.template"
+	"${CMAKE_SOURCE_DIR}/VERSION.template"
+)
+
+# Use add_custom_command(OUTPUT ...) to properly declare file outputs.
+# This creates real file-level dependencies (not just order-only deps),
+# fixing race conditions where compilation starts before version generation.
+# Remove any existing generated files first to ensure fresh generation.
+add_custom_command(
+	OUTPUT ${VERSION_GENERATE_SOURCES}
 	COMMAND "${CMAKE_COMMAND}"
 		"-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}"
 		"-DCMAKE_MODULES_SPRING=${CMAKE_MODULES_SPRING}"
@@ -593,9 +670,13 @@ add_custom_command(TARGET generateVersionFiles
 		"-DVERSION_ADDITIONAL=${VERSION_ADDITIONAL}"
 		-P "${CMAKE_MODULES_SPRING}/ConfigureVersion.cmake"
 		"${VERSION_GENERATE_DIR}"
-	COMMENT
-		"  Configuring Version files ..." VERBATIM
+	DEPENDS ${VERSION_TEMPLATE_FILES} ${VERSION_GIT_DEPS}
+	COMMENT "  Configuring Version files ..."
+	VERBATIM
 )
+
+# Target for dependency purposes
+add_custom_target(generateVersionFiles DEPENDS ${VERSION_GENERATE_SOURCES})
 
 add_dependencies(generateSources generateVersionFiles)
 
@@ -603,7 +684,14 @@ add_dependencies(generateSources generateVersionFiles)
 ### Where the other CMakeLists.txt are
 
 # As the libs are required by all the other sub-projects, we add them first
+# Options that affect lib selection must be declared here, before rts/lib is processed
+option(USE_MIMALLOC "Use mimalloc memory allocator" TRUE)
 add_subdirectory(rts/lib)
+
+# Fix for MinGW assembler limitations with large object files
+if(MINGW)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wa,-mbig-obj")
+endif()
 
 if    (NOT "${AI_TYPES}" STREQUAL "NONE")
 	add_subdirectory(AI)

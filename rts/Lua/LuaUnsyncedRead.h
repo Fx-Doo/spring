@@ -143,6 +143,7 @@ class LuaUnsyncedRead {
 		static int GetGameSpeed(lua_State* L);
 		static int GetGameState(lua_State* L);
 
+		static int GetMouseButtonsPressed(lua_State* L);
 		static int GetMouseState(lua_State* L);
 		static int GetMouseCursor(lua_State* L);
 		static int GetMouseStartPosition(lua_State* L);
@@ -218,8 +219,14 @@ class LuaUnsyncedRead {
 		static int GetGroundDecalCreationFrame(lua_State* L);
 		static int GetGroundDecalType(lua_State* L);
 		static int GetGroundDecalOwner(lua_State* L);
+		static int GetGroundDecalGlowParams(lua_State* L);
+		static int GetGroundDecalUserData(lua_State* L);
 
 		static int UnitIconGetDraw(lua_State* L);
+		static int GetUnitIconData(lua_State* L);
+		static int GetUnitIcon(lua_State* L);
+		static int GetIconData(lua_State* L);
+		static int GetAllIconDataArray(lua_State* L);
 
 		static int GetSyncedGCInfo(lua_State* L);
 

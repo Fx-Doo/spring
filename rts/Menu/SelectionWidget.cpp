@@ -100,7 +100,7 @@ void SelectionWidget::ShowDemoList(const std::function<void(const std::string&)>
 	curSelect->Selected = std::bind(&SelectionWidget::SelectDemo, this, std::placeholders::_1);
 	curSelect->WantClose = std::bind(&SelectionWidget::CleanWindow, this);
 
-	const std::string cwd = FileSystem::EnsurePathSepAtEnd(FileSystemAbstraction::GetCwd());
+	const std::string cwd = FileSystem::EnsurePathSepAtEnd(FileSystem::GetCwd());
 	const std::string dir = FileSystem::EnsurePathSepAtEnd("demos");
 
 	// FIXME: names overflow the box
@@ -120,7 +120,7 @@ void SelectionWidget::ShowSavegameList(const std::function<void(const std::strin
 	curSelect->Selected = std::bind(&SelectionWidget::SelectSavegame, this, std::placeholders::_1);
 	curSelect->WantClose = std::bind(&SelectionWidget::CleanWindow, this);
 
-	const std::string cwd = FileSystem::EnsurePathSepAtEnd(FileSystemAbstraction::GetCwd());
+	const std::string cwd = FileSystem::EnsurePathSepAtEnd(FileSystem::GetCwd());
 	const std::string dir = FileSystem::EnsurePathSepAtEnd("Saves");
 
 	// FIXME: names overflow the box
@@ -226,7 +226,7 @@ void SelectionWidget::UpdateAvailableScripts()
 	// add sandbox script to list
 	availableScripts.push_back(SandboxAI);
 
-	// add native ai's to the list, too (but second, lua ai's are prefered)
+	// add native ai's to the list, too (but second, lua ai's are preferred)
 	for (const auto& pair: CAIScriptHandler::Instance().GetScriptMap()) {
 		availableScripts.push_back(pair.first);
 	}

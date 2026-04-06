@@ -121,22 +121,17 @@ bool CheckAvailableVideoModes()
 static bool GetVideoMemInfoNV(GLint* memInfo)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	#if (defined(GL_NVX_gpu_memory_info))
 	if (!GLAD_GL_NVX_gpu_memory_info)
 		return false;
 
 	glGetIntegerv(GL_GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX, &memInfo[0]);
 	glGetIntegerv(GL_GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX, &memInfo[1]);
 	return true;
-	#else
-	return false;
-	#endif
 }
 
 static bool GetVideoMemInfoATI(GLint* memInfo)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	#if (defined(GL_ATI_meminfo))
 	if (!GLAD_GL_ATI_meminfo)
 		return false;
 
@@ -151,9 +146,6 @@ static bool GetVideoMemInfoATI(GLint* memInfo)
 	memInfo[0] = memInfo[4]; // return the VBO/RBO/TEX free sum
 	memInfo[1] = memInfo[4]; // sic, just assume total >= free
 	return true;
-	#else
-	return false;
-	#endif
 }
 
 static bool GetVideoMemInfoMESA(GLint* memInfo)
@@ -274,7 +266,7 @@ void RecoilGetTexParams(GLenum target, GLuint textureID, GLint level, TexturePar
 		glGetTexLevelParameteriv(target, level, GL_TEXTURE_DEPTH_SIZE, &_cbits); tp.bpp += _cbits; if (_cbits > 0) { tp.chNum++; tp.isNormalizedDepth = true; tp.prefDataType = GL_FLOAT; }
 
 		if (tp.chNum > 0) {
-			if (auto bytesPerChannel = tp.bpp / tp.chNum; bytesPerChannel == 4)
+			if (auto bytesPerChannel = (tp.bpp / tp.chNum) >> 3; bytesPerChannel == 4)
 				tp.prefDataType = GL_UNSIGNED_INT;
 			else if (bytesPerChannel == 2)
 				tp.prefDataType = GL_UNSIGNED_SHORT;
@@ -303,7 +295,7 @@ void RecoilGetTexParams(GLenum target, GLuint textureID, GLint level, TexturePar
 void glSaveTexture(const GLuint textureID, const char* filename, int level)
 {
 	TextureParameters params;
-	RecoilGetTexParams(GL_TEXTURE_2D, textureID, 0, params);
+	RecoilGetTexParams(GL_TEXTURE_2D, textureID, level, params);
 
 	CBitmap bmp;
 	GLenum extFormat = params.isNormalizedDepth ? GL_DEPTH_COMPONENT : CBitmap::GetExtFmt(params.chNum);
@@ -324,6 +316,48 @@ void glSaveTexture(const GLuint textureID, const char* filename, int level)
 	}
 }
 
+
+void glSaveTextureArray(const GLuint textureID, const char* filename, int level, int page)
+{
+	TextureParameters params;
+	RecoilGetTexParams(GL_TEXTURE_2D_ARRAY, textureID, level, params);
+
+	GLenum extFormat = params.isNormalizedDepth ? GL_DEPTH_COMPONENT : CBitmap::GetExtFmt(params.chNum);
+
+	CBitmap bmp;
+	bmp.Alloc(params.sizeX, params.sizeY, params.chNum, params.prefDataType);
+
+	if (GLAD_GL_VERSION_4_5) {
+		//DSA, needs no binding
+		glGetTextureSubImage(textureID, level, 0, 0, page, params.sizeX, params.sizeY, 1, extFormat, params.prefDataType, bmp.GetMemSize(), bmp.GetRawMem());
+	}
+	else {
+		const size_t pageSize = params.sizeX * params.sizeY * params.chNum * CBitmap::GetDataTypeSize(params.prefDataType);
+		const size_t allPagesSize = pageSize * params.sizeZ;
+		assert(params.imageSize == allPagesSize);
+
+		static std::vector<uint8_t> dataBytes;
+		dataBytes.resize(allPagesSize);
+
+		auto texBind = GL::TexBind(GL_TEXTURE_2D_ARRAY, textureID);
+		glGetTexImage(GL_TEXTURE_2D_ARRAY, level, extFormat, params.prefDataType, dataBytes.data());
+
+		std::copy(
+			dataBytes.data() + (page + 0) * pageSize,
+			dataBytes.data() + (page + 1) * pageSize,
+			bmp.GetRawMem()
+		);
+	}
+
+	if (params.isNormalizedDepth) {
+		//doesn't work, TODO: fix
+		bmp.SaveFloat(filename);
+	}
+	else {
+		bmp.Save(filename, params.bpp < 32);
+	}
+}
+
 void RecoilTexStorage2D(GLenum target, GLint levels, GLint internalFormat, GLsizei width, GLsizei height)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -333,8 +367,8 @@ void RecoilTexStorage2D(GLenum target, GLint levels, GLint internalFormat, GLsiz
 	if (GLAD_GL_ARB_texture_storage) {
 		glTexStorage2D(target, levels, internalFormat, width, height);
 	} else {
-		auto format = GL::GetInternalFormatDataFormat(internalFormat);
-		auto type   = GL::GetInternalFormatDataType(internalFormat);
+		auto format = GL::GetDataFormatFromInternalFormat(internalFormat);
+		auto type   = GL::GetDataTypeFromInternalFormat(internalFormat);
 
 		for (int level = 0; level < levels; ++level)
 			glTexImage2D(target, level, internalFormat, std::max(width >> level, 1), std::max(height >> level, 1), 0, format, type, nullptr);
@@ -352,8 +386,8 @@ void RecoilTexStorage3D(GLenum target, GLint levels, GLint internalFormat, GLsiz
 	if (GLAD_GL_ARB_texture_storage) {
 		glTexStorage3D(target, levels, internalFormat, width, height, depth);
 	} else {
-		auto format = GL::GetInternalFormatDataFormat(internalFormat);
-		auto type   = GL::GetInternalFormatDataType(internalFormat);
+		auto format = GL::GetDataFormatFromInternalFormat(internalFormat);
+		auto type   = GL::GetDataTypeFromInternalFormat(internalFormat);
 
 		for (int level = 0; level < levels; ++level)
 			glTexImage3D(target, level, internalFormat, std::max(width >> level, 1), std::max(height >> level, 1), std::max(depth >> level, 1), 0, format, type, nullptr);
@@ -367,19 +401,7 @@ void RecoilBuildMipmaps(const GLenum target, GLint internalFormat, const GLsizei
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 
-	if (globalRendering->compressTextures) {
-		switch (internalFormat) {
-			case 4:
-			case GL_RGBA8 :
-			case GL_RGBA :  internalFormat = GL_COMPRESSED_RGBA_ARB; break;
-
-			case 3:
-			case GL_RGB8 :
-			case GL_RGB :   internalFormat = GL_COMPRESSED_RGB_ARB; break;
-
-			case GL_LUMINANCE: internalFormat = GL_COMPRESSED_LUMINANCE_ARB; break;
-		}
-	}
+	internalFormat = GL::GetCompressedInternalFormat(internalFormat);
 
 	// the number of required levels was not specified, assume the request for
 	// mipmapped texture, determine the number of levels
@@ -472,7 +494,7 @@ bool glSpringBlitImages(
 				break;
 			}
 			glReadBuffer(GL_COLOR_ATTACHMENT0);
-			const auto fbStatus = glCheckFramebufferStatusEXT(GL_READ_FRAMEBUFFER_EXT);
+			const auto fbStatus = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER_EXT);
 			result &= (fbStatus == GL_FRAMEBUFFER_COMPLETE_EXT);
 		}
 
@@ -501,7 +523,7 @@ bool glSpringBlitImages(
 				break;
 			}
 			glDrawBuffer(GL_COLOR_ATTACHMENT0);
-			const auto fbStatus = glCheckFramebufferStatusEXT(GL_DRAW_FRAMEBUFFER);
+			const auto fbStatus = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
 			result &= (fbStatus == GL_FRAMEBUFFER_COMPLETE_EXT);
 		}
 

@@ -134,6 +134,8 @@
 
 #include "System/Misc/TracyDefs.h"
 
+#include "fmt/ranges.h"
+
 
 #undef CreateDirectory
 
@@ -169,8 +171,6 @@ CR_REG_METADATA(CGame, (
 	CR_IGNORED(lastSimFrameNetPacketTime),
 	CR_IGNORED(lastUnsyncedUpdateTime),
 	CR_IGNORED(skipLastDrawTime),
-
-	CR_IGNORED(lastActionList), //IGNORED?
 
 	CR_IGNORED(updateDeltaSeconds),
 	CR_MEMBER(totalGameTime),
@@ -212,10 +212,9 @@ CR_REG_METADATA(CGame, (
 	CR_MEMBER(luaGCControl),
 
 	CR_IGNORED(jobDispatcher),
-	CR_IGNORED(curKeyCodeChain),
-	CR_IGNORED(curScanCodeChain),
 	CR_IGNORED(worldDrawer),
 	CR_IGNORED(saveFileHandler),
+	CR_IGNORED(gameInputReceiver),
 
 	// Post Load
 	CR_POSTLOAD(PostLoad)
@@ -681,7 +680,7 @@ void CGame::PostLoadSimulation(LuaParser* defsParser)
 	CUnitScriptFactory::InitStatic();
 	CUnitScriptEngine::InitStatic();
 	MoveTypeFactory::InitStatic();
-	CWeaponLoader::InitStatic();
+	CWeaponLoader::InitStatic(unitDefHandler);
 
 	unitHandler.Init();
 	featureHandler.Init();
@@ -739,8 +738,11 @@ void CGame::PreLoadRendering()
 	geometricObjects = new CGeometricObjects();
 
 	// load components that need to exist before PostLoadSimulation
-	matrixUploader.Init();
-	modelsUniformsUploader.Init();
+	modelUniformsStorage.Init();
+	//transformsMemStorage.Init(); // Add?
+
+	transformsUploader.Init();
+	modelUniformsUploader.Init();
 	worldDrawer.InitPre();
 }
 
@@ -1000,8 +1002,12 @@ void CGame::KillRendering()
 	icon::iconHandler.Kill();
 	spring::SafeDelete(geometricObjects);
 	worldDrawer.Kill();
-	matrixUploader.Kill();
-	modelsUniformsUploader.Kill();
+
+	modelUniformsStorage.Kill();
+	//transformsMemStorage.Kill(); //Add?
+
+	transformsUploader.Kill();
+	modelUniformsUploader.Kill();
 }
 
 void CGame::KillInterface()
@@ -1103,89 +1109,21 @@ void CGame::ResizeEvent()
 	}
 }
 
-
 int CGame::KeyPressed(int keyCode, int scanCode, bool isRepeat)
 {
-	RECOIL_DETAILED_TRACY_ZONE;
-	if (!gameOver && !isRepeat)
-		playerHandler.Player(gu->myPlayerNum)->currentStats.keyPresses++;
-
-	const CKeySet kc(keyCode, CKeySet::KSKeyCode);
-	const CKeySet ks(scanCode, CKeySet::KSScanCode);
-
-	curKeyCodeChain.push_back(kc, spring_gettime(), isRepeat);
-	curScanCodeChain.push_back(ks, spring_gettime(), isRepeat);
-
-	lastActionList = keyBindings.GetActionList(curKeyCodeChain, curScanCodeChain);
-
-	if (RmlGui::ProcessKeyPressed(keyCode, scanCode, isRepeat))
-		return 0;
-
-	if (gameTextInput.ConsumePressedKey(keyCode, scanCode, lastActionList))
-		return 0;
-
-	if (luaInputReceiver->KeyPressed(keyCode, scanCode, isRepeat))
-		return 0;
-
-
-	// try the input receivers
-	for (CInputReceiver* recv: CInputReceiver::GetReceivers()) {
-		if (recv != nullptr && recv->KeyPressed(keyCode, scanCode, isRepeat))
-			return 0;
-	}
-
-	// try our list of actions
-	for (const Action& action: lastActionList) {
-		if (ActionPressed(keyCode, scanCode, action, isRepeat)) {
-			return 0;
-		}
-	}
-
-	// maybe a widget is interested?
-	if (luaUI != nullptr) {
-		for (const Action& action: lastActionList) {
-			luaUI->GotChatMsg(action.rawline, false);
-		}
-	}
-
-	if (luaMenu != nullptr) {
-		for (const Action& action: lastActionList) {
-			luaMenu->GotChatMsg(action.rawline, false);
-		}
-	}
-
+	gameInputReceiver.KeyPressed(keyCode, scanCode, isRepeat);
 	return 0;
 }
 
-
 int CGame::KeyReleased(int keyCode, int scanCode)
 {
-	RECOIL_DETAILED_TRACY_ZONE;
-	if (RmlGui::ProcessKeyReleased(keyCode, scanCode))
-		return 0;
-
-	if (gameTextInput.ConsumeReleasedKey(keyCode, scanCode))
-		return 0;
-
-	// update actionlist for lua consumer
-	lastActionList = keyBindings.GetActionList(keyCode, scanCode);
-
-	if (luaInputReceiver->KeyReleased(keyCode, scanCode))
-		return 0;
-
-	// try the input receivers
-	for (CInputReceiver* recv: CInputReceiver::GetReceivers()) {
-		if (recv != nullptr && recv->KeyReleased(keyCode, scanCode)) {
-			return 0;
-		}
-	}
-
-	for (const Action& action: lastActionList) {
-		if (ActionReleased(action))
-			return 0;
-	}
-
+	gameInputReceiver.KeyReleased(keyCode, scanCode);
 	return 0;
+}
+
+CInputReceiver* CGame::GetInputReceiver()
+{
+	return &gameInputReceiver;
 }
 
 int CGame::KeyMapChanged()
@@ -1358,7 +1296,7 @@ bool CGame::UpdateUnsynced(const spring_time currentTime)
 		// This mode tries to correct for the wrongly calculated timeOffset adaptively,
 		// while trying to maintain a smooth interpolation rate
 		// As frame rates dip below 45fps, this method is only marginally better than old method
-		// But that is heavily dependent on wether the load is sim or draw based.
+		// But that is heavily dependent on whether the load is sim or draw based.
 		// TODO: the camera smoothing still seems to take sim load into account heavily. So large sim loads jitter the camera quite a bit when moving
 		if (SmoothTimeOffset > 0){
 
@@ -1372,7 +1310,7 @@ bool CGame::UpdateUnsynced(const spring_time currentTime)
 				// What we want to know is when the last draw happened, and at what offset.
 				// There are two special cases here, if the last draw happened "on time", then we want to 'pull in' CTO to 0,
 				// irrespective of the time spent in sim.
-				// If the last draw frame didnt happend on time, and had a large CTO, then we need to 'carry over' some time offset
+				// If the last draw frame didnt happen on time, and had a large CTO, then we need to 'carry over' some time offset
 
 				if ((LTO + drawsimratio - 1.0 > (CTO)* strictness)) {
 					newCTO = std::fmin((LTO + drawsimratio - 1.0f) * strictness, 1.3f);
@@ -1420,6 +1358,7 @@ bool CGame::UpdateUnsynced(const spring_time currentTime)
 
 	lineDrawer.UpdateLineStipple();
 
+	icon::iconHandler.Update();
 	CNamedTextures::Update();
 
 	// always update InfoTexture and SoundListener at <= 30Hz (even when paused)
@@ -1473,8 +1412,8 @@ bool CGame::UpdateUnsynced(const spring_time currentTime)
 	shadowHandler.Update();
 	{
 		worldDrawer.Update(newSimFrame);
-		matrixUploader.Update();
-		modelsUniformsUploader.Update();
+		transformsUploader.Update();
+		modelUniformsUploader.Update();
 	}
 
 	mouse->UpdateCursorCameraDir(); // make sure mouse->dir is in sync with camera
@@ -1497,6 +1436,7 @@ bool CGame::Draw() {
 	const spring_time currentTimePreDraw = spring_gettime();
 
 	SCOPED_SPECIAL_TIMER("Draw");
+	SCOPED_GL_DEBUGGROUP("Draw");
 	globalRendering->SetGLTimeStamp(CGlobalRendering::FRAME_REF_TIME_QUERY_IDX);
 
 	SetDrawMode(gameNormalDraw);
@@ -1570,6 +1510,7 @@ bool CGame::Draw() {
 
 	{
 		SCOPED_TIMER("Draw::Screen");
+		SCOPED_GL_DEBUGGROUP("Draw::Screen");
 		if (CUnitDrawer::UseScreenIcons())
 			unitDrawer->DrawUnitIconsScreen();
 
@@ -1625,10 +1566,12 @@ void CGame::DrawInputReceivers()
 		{
 			// this has MANUAL ordering, draw it last (front-most)
 			SCOPED_TIMER("Draw::Screen::DrawScreen");
+			SCOPED_GL_DEBUGGROUP("Draw::Screen::DrawScreen");
 			luaInputReceiver->Draw();
 		}
 	} else {
 		SCOPED_TIMER("Draw::Screen::Minimap");
+		SCOPED_GL_DEBUGGROUP("Draw::Screen::Minimap");
 
 		if (globalRendering->dualScreenMode) {
 			// minimap is on its own screen, so always draw it
@@ -1744,6 +1687,9 @@ void CGame::SimFrame() {
 
 	// note: starts at -1, first actual frame is 0
 	gs->frameNum += 1;
+#ifdef SYNC_HISTORY
+	CSyncChecker::NewGameFrame();
+#endif
 	lastFrameTime = spring_gettime();
 	// This is not very ideal, as the timeoffset of each new draw frame is also calculated from this
 	// with a strange side effect: if the timeOffset was a high number, like 0.9, then this will force the next draw frame to have an offset of 0.0x
@@ -1797,6 +1743,11 @@ void CGame::SimFrame() {
 	{
 		SCOPED_SPECIAL_TIMER("Sim");
 
+		// Lua unit scripts change piece positions and orientations in eventHandler.GameFrame(gs->frameNum);
+		// so we need to save the previous unit state before it happened
+		unitHandler.UpdatePreFrame();
+		featureHandler.UpdatePreFrame();
+
 		{
 			SCOPED_TIMER("Sim::GameFrame");
 
@@ -1827,6 +1778,8 @@ void CGame::SimFrame() {
 
 			SCOPED_TIMER("Sim::Script");
 			unitScriptEngine->Tick(tickMs);
+
+			unitHandler.UpdatePostAnimation();
 		}
 		envResHandler.Update();
 		losHandler->Update();
@@ -2179,34 +2132,35 @@ void CGame::Save(std::string&& fileName, std::string&& saveArgs)
 
 
 
-bool CGame::ProcessCommandText(int keyCode, int scanCode, const std::string& command) {
+bool CGame::ProcessCommandText(const std::string& command) {
 	RECOIL_DETAILED_TRACY_ZONE;
 	if (command.size() <= 2)
 		return false;
 
 	if ((command[0] == '/') && (command[1] != '/')) {
 		// strip the '/'
-		ProcessAction(Action(command.substr(1)), keyCode, scanCode, false);
+		ProcessAction(Action(command.substr(1)), false);
 		return true;
 	}
 
 	return false;
 }
 
-bool CGame::ProcessAction(const Action& action, int keyCode, int scanCode, bool isRepeat)
+bool CGame::ProcessAction(const Action& action, bool isRepeat)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	if (ActionPressed(keyCode, scanCode, action, isRepeat))
+	if (ActionPressed(action, isRepeat))
 		return true;
 
+	bool handled = false;
 	// maybe a widget is interested?
-	if (luaUI != nullptr)
-		luaUI->GotChatMsg(action.rawline, false); //FIXME add return argument!
+	if (luaUI != nullptr && luaUI->GotChatMsg(action.rawline, false))
+		handled = true;
 
-	if (luaMenu != nullptr)
-		luaMenu->GotChatMsg(action.rawline, false); //FIXME add return argument!
+	if (luaMenu != nullptr && luaMenu->GotChatMsg(action.rawline, false))
+		handled = true;
 
-	return false;
+	return handled;
 }
 
 void CGame::ActionReceived(const Action& action, int playerID)
@@ -2226,16 +2180,11 @@ void CGame::ActionReceived(const Action& action, int playerID)
 	}
 }
 
-bool CGame::ActionPressed(int keyCode, int scanCode, const Action& action, bool isRepeat)
+bool CGame::ActionPressed(const Action& action, bool isRepeat)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	const IUnsyncedActionExecutor* executor = unsyncedGameCommands->GetActionExecutor(action.command);
-
-	if (executor != nullptr) {
-		// an executor for that action was found
-		if (executor->ExecuteAction(UnsyncedAction(action, keyCode, isRepeat)))
-			return true;
-	}
+	if (unsyncedGameCommands->ActionPressed(action, isRepeat))
+		return true;
 
 	if (CGameServer::IsServerCommand(action.command)) {
 		CommandMessage pckt(action, gu->myPlayerNum);
@@ -2245,3 +2194,14 @@ bool CGame::ActionPressed(int keyCode, int scanCode, const Action& action, bool 
 
 	return (gameCommandConsole.ExecuteAction(action));
 }
+
+bool CGame::ActionReleased(const Action& action)
+{
+	return unsyncedGameCommands->ActionReleased(action);
+}
+
+const ActionList& CGame::GetLastActionList()
+{
+	return gameInputReceiver.lastActionList;
+}
+

@@ -1,6 +1,6 @@
 add_definitions    (-DDEDICATED ${PIC_FLAG} -DNOT_USING_CREG)
 add_definitions    (-DHEADLESS -DNO_SOUND)
-remove_definitions (-DSTREFLOP_SSE -DAVI_CAPTURING)
+remove_definitions (-DAVI_CAPTURING)
 remove_definitions (-DTRACE_SYNC -DSYNCDEBUG)
 remove_definitions (-DTHREADPOOL)
 
@@ -20,9 +20,8 @@ set(ENGINE_SRC_ROOT_DIR "${CMAKE_SOURCE_DIR}/rts")
 
 
 ### Assemble libraries
-list(APPEND engineDedicatedLibraries cpuid)
 list(APPEND engineDedicatedLibraries ${Boost_REGEX_LIBRARY})
-list(APPEND engineDedicatedLibraries lua archives 7zip prd::jsoncpp
+list(APPEND engineDedicatedLibraries lua archives_nothreadpool 7zip prd::jsoncpp
 	${SPRING_MINIZIP_LIBRARY} ZLIB::ZLIB gflags_nothreads_static Tracy::TracyClient)
 list(APPEND engineDedicatedLibraries headlessStubs engineSystemNet)
 if(UNIX AND NOT (CMAKE_SYSTEM_NAME MATCHES "OpenBSD"))
@@ -30,11 +29,22 @@ if(UNIX AND NOT (CMAKE_SYSTEM_NAME MATCHES "OpenBSD"))
 endif()
 list(APPEND engineDedicatedLibraries ${LZMA_LIBRARY})
 
+#nowide for Windows utf-8 abstraction layer
+list(APPEND engineDedicatedLibraries "nowide::nowide")
+
+# fmt library
+list(APPEND engineDedicatedLibraries "fmt::fmt")
+
 ### base64 from pr-downloader
 list(APPEND engineDedicatedLibraries "prd::base64")
 
 ### smmalloc
 list(APPEND engineDedicatedLibraries "smmalloc")
+
+### mimalloc
+if (USE_MIMALLOC)
+    list(APPEND engineDedicatedLibraries mimalloc-static)
+endif()
 
 if (WIN32)
 	list(APPEND engineDedicatedLibraries ${WINMM_LIBRARY})
@@ -54,11 +64,12 @@ if    (UNIX AND NOT MINGW)
 	endif(CMAKE_SYSTEM_NAME MATCHES "FreeBSD" OR CMAKE_SYSTEM_NAME MATCHES "OpenBSD")
 endif (UNIX AND NOT MINGW)
 
-### Assemble the incude dirs
+### Assemble the include dirs
 include_directories(${ENGINE_SRC_ROOT_DIR}/)
 include_directories(${ENGINE_SRC_ROOT_DIR}/lib/lua/include)
 include_directories(${ENGINE_SRC_ROOT_DIR}/lib/7zip)
 include_directories(${ENGINE_SRC_ROOT_DIR}/lib/asio/include)
+include_directories(${ENGINE_SRC_ROOT_DIR}/lib/nowide/include)
 
 
 
@@ -102,6 +113,7 @@ set(system_files
 	${ENGINE_SRC_ROOT_DIR}/System/Log/ConsoleSink.cpp
 	${ENGINE_SRC_ROOT_DIR}/System/Log/TracySink.cpp
 	${ENGINE_SRC_ROOT_DIR}/System/Misc/SpringTime.cpp
+	${ENGINE_SRC_ROOT_DIR}/System/Platform/ConsoleInit.cpp
 	${ENGINE_SRC_ROOT_DIR}/System/Platform/errorhandler.cpp
 	${ENGINE_SRC_ROOT_DIR}/System/Platform/CpuID.cpp
 	${ENGINE_SRC_ROOT_DIR}/System/Platform/Misc.cpp
@@ -116,13 +128,19 @@ set(system_files
 	${ENGINE_SRC_ROOT_DIR}/System/TimeUtil.cpp
 	${ENGINE_SRC_ROOT_DIR}/System/SafeCStrings.c
 	${ENGINE_SRC_ROOT_DIR}/System/SafeVector.cpp
+	${ENGINE_SRC_ROOT_DIR}/System/SpringMath.cpp
+	${ENGINE_SRC_ROOT_DIR}/System/Sync/FPUCheck.cpp
 	${ENGINE_SRC_ROOT_DIR}/System/UriParser.cpp
 	${ENGINE_SRC_ROOT_DIR}/System/StringUtil.cpp
+	${ENGINE_SRC_ROOT_DIR}/System/float3.cpp
 	${ENGINE_SRC_ROOT_DIR}/System/float4.cpp
+	${ENGINE_SRC_ROOT_DIR}/System/MemoryOverride.cpp
 	)
 if    (WIN32)
 	list(APPEND system_files ${ENGINE_SRC_ROOT_DIR}/System/Platform/Win/Hardware.cpp)
 	list(APPEND system_files ${ENGINE_SRC_ROOT_DIR}/System/Platform/Win/WinVersion.cpp)
+	list(APPEND system_files ${ENGINE_SRC_ROOT_DIR}/System/Platform/SharedLib.cpp)
+	list(APPEND system_files ${ENGINE_SRC_ROOT_DIR}/System/Platform/Win/DllLib.cpp)
 else  ()
 	list(APPEND system_files ${ENGINE_SRC_ROOT_DIR}/System/Platform/Linux/Hardware.cpp)
 endif ()
@@ -147,7 +165,9 @@ set(engineDedicatedSources
 	${ENGINE_SRC_ROOT_DIR}/Sim/Misc/AllyTeam.cpp
 	${ENGINE_SRC_ROOT_DIR}/Sim/Units/CommandAI/Command.cpp ## LuaUtils::ParseCommand*
 	${ENGINE_SRC_ROOT_DIR}/Lua/LuaConstEngine.cpp
+	${ENGINE_SRC_ROOT_DIR}/Lua/LuaEncoding.cpp
 	${ENGINE_SRC_ROOT_DIR}/Lua/LuaIO.cpp
+	${ENGINE_SRC_ROOT_DIR}/Lua/LuaMathExtra.cpp
 	${ENGINE_SRC_ROOT_DIR}/Lua/LuaMemPool.cpp
 	${ENGINE_SRC_ROOT_DIR}/Lua/LuaParser.cpp
 	${ENGINE_SRC_ROOT_DIR}/Lua/LuaUtils.cpp
@@ -166,6 +186,13 @@ add_executable(engine-dedicated
 		main.cpp
 	)
 target_link_libraries(engine-dedicated ${engineDedicatedLibraries})
+
+# Export symbols for plugin access (replaces CMP0065 OLD behavior)
+set_target_properties(engine-dedicated PROPERTIES ENABLE_EXPORTS TRUE)
+
+if(MSVC)
+    target_link_libraries(engine-dedicated engine-natvis)
+endif()
 if    (MINGW)
 	target_link_libraries(engine-dedicated ${WS2_32_LIBRARY} ${IMAGEHLP_LIBRARY} ${IPHLPAPI_LIBRARY} ${WINMM_LIBRARY})
 endif (MINGW)

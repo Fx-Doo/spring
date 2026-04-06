@@ -21,6 +21,7 @@
 #include "Sim/Projectiles/ProjectileHandler.h"
 #include "Sim/Units/Scripts/CobInstance.h"
 #include "Sim/Units/CommandAI/BuilderCAI.h"
+#include "Sim/Units/CommandAI/BuilderCaches.h"
 #include "Sim/Units/CommandAI/CommandAI.h"
 #include "Sim/Units/UnitDefHandler.h"
 #include "Sim/Units/UnitHandler.h"
@@ -388,7 +389,6 @@ bool CBuilder::UpdateReclaim(const Command& fCommand)
 bool CBuilder::UpdateResurrect(const Command& fCommand)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	CBuilderCAI* cai = static_cast<CBuilderCAI*>(commandAI);
 	CFeature* curResurrectee = curResurrect;
 
 	if (curResurrectee == nullptr || f3SqDist(curResurrectee->pos, pos) >= Square(buildDistance + curResurrectee->buildeeRadius) || !inBuildStance)
@@ -417,7 +417,7 @@ bool CBuilder::UpdateResurrect(const Command& fCommand)
 	const float step = resurrectSpeed / resurrecteeDef->buildTime;
 
 	const bool resurrectAllowed = eventHandler.AllowFeatureBuildStep(this, curResurrectee, step);
-	const bool canExecResurrect = (resurrectAllowed && UseEnergy(resurrecteeDef->cost.energy * step * modInfo.resurrectEnergyCostFactor));
+	const bool canExecResurrect = (resurrectAllowed && UseResources(resurrecteeDef->cost * step * modInfo.resurrectCostFactor));
 
 	if (canExecResurrect) {
 		curResurrectee->resurrectProgress += step;
@@ -440,7 +440,7 @@ bool CBuilder::UpdateResurrect(const Command& fCommand)
 		resurrectee->SetSoloBuilder(this, resurrecteeDef);
 		resurrectee->SetHeading(curResurrectee->heading, !resurrectee->upright && resurrectee->IsOnGround(), false, 0.0f);
 
-		for (const int resurrecterID: cai->resurrecters) {
+		for (const int resurrecterID: CBuilderCaches::resurrecters) {
 			CBuilder* resurrecter = static_cast<CBuilder*>(unitHandler.GetUnit(resurrecterID));
 			CCommandAI* resurrecterCAI = resurrecter->commandAI;
 
@@ -449,7 +449,7 @@ bool CBuilder::UpdateResurrect(const Command& fCommand)
 
 			Command& c = resurrecterCAI->commandQue.front();
 
-			if (c.GetID() != CMD_RESURRECT || c.GetNumParams() != 1)
+			if (c.GetID() != CMD_RESURRECT || (c.GetNumParams() != 1 && c.GetNumParams() != 5))
 				continue;
 
 			if ((c.GetParam(0) - unitHandler.MaxUnits()) != curResurrectee->id)
@@ -464,6 +464,12 @@ bool CBuilder::UpdateResurrect(const Command& fCommand)
 			// prevent FinishCommand from removing this command when the
 			// feature is deleted, since it is needed to start the repair
 			// (WTF!)
+			//
+			// The future lurker:
+			// if you were searching where the hell the huge floating point number
+			// in params[0] was coming from and traced it back to this WTF hack,
+			// increment the number of wasted hours below:
+			//   number_of_hours_wasted = 3;
 			c.SetParam(0, INT_MAX / 2);
 		}
 
@@ -498,11 +504,11 @@ bool CBuilder::UpdateCapture(const Command& fCommand)
 	const float captureProgressTemp = std::min(curCapturee->captureProgress + captureProgressStep, 1.0f);
 
 	const float captureFraction = captureProgressTemp - curCapturee->captureProgress;
-	const float energyUseScaled = curCapturee->cost.energy * captureFraction * modInfo.captureEnergyCostFactor;
+	const auto resourceUseScaled = curCapturee->cost * captureFraction * modInfo.captureCostFactor;
 
 	const bool buildStepAllowed = (eventHandler.AllowUnitBuildStep(this, curCapturee, captureProgressStep));
 	const bool captureStepAllowed = (eventHandler.AllowUnitCaptureStep(this, curCapturee, captureProgressStep));
-	const bool canExecCapture = (buildStepAllowed && captureStepAllowed && UseEnergy(energyUseScaled));
+	const bool canExecCapture = (buildStepAllowed && captureStepAllowed && UseResources(resourceUseScaled));
 
 	if (!canExecCapture)
 		return true;
@@ -926,7 +932,7 @@ bool CBuilder::ScriptStartBuilding(float3 pos, bool silent)
 		// clamping p - pitch not needed, range of asin is -PI/2..PI/2,
 		// so max difference between two asin calls is PI.
 		// FIXME: convert CSolidObject::heading to radians too.
-		script->StartBuilding(ClampRad(h - heading * TAANG2RAD), p - pitch);
+		script->StartBuilding(ClampRadPi(h - heading * TAANG2RAD), p - pitch);
 	}
 
 	if ((!silent || inBuildStance) && IsInLosForAllyTeam(gu->myAllyTeam))

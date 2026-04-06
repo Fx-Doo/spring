@@ -84,7 +84,7 @@ static const unsigned int FLOAT_MEMBER_HASHES[] = {
 
 static bool UnitIsBusy(const CCommandAI* cai) {
 	// queued move-commands (or active build/repair/etc-commands) mean unit has to stay airborne
-	return (cai->inCommand || cai->HasMoreMoveCommands(false));
+	return (cai->inCommand != CMD_STOP || cai->HasMoreMoveCommands(false));
 }
 
 static bool UnitHasLoadCmd(const CCommandAI* cai) {
@@ -755,13 +755,13 @@ void CHoverAirMoveType::UpdateVerticalSpeed(const float4& spd, float curRelHeigh
 	// first restore original vertical speed
 	owner->SetVelocity((spd * XZVector) + (UpVector * curVertSpeed));
 
-	if (collisionState == COLLISION_DIRECT) {
+	if (collisionState == COLLISION_DIRECT && aircraftState != AIRCRAFT_TAKEOFF) {
 		const float3 dir = lastCollidee->midPos - owner->midPos;
 		const float3 sdir = lastCollidee->speed - spd;
 
 		if (spd.dot(dir + sdir * 20.0f) < 0.0f) {
-			wh -= (30.0f * (lastCollidee->midPos.y >  owner->pos.y));
-			wh += (50.0f * (lastCollidee->midPos.y <= owner->pos.y));
+			wh -= (30.0f * (lastCollidee->midPos.y >  owner->midPos.y));
+			wh += (50.0f * (lastCollidee->midPos.y <= owner->midPos.y));
 		}
 	}
 
@@ -793,7 +793,7 @@ void CHoverAirMoveType::UpdateVerticalSpeed(const float4& spd, float curRelHeigh
 }
 
 
-void CHoverAirMoveType::UpdateAirPhysics()
+bool CHoverAirMoveType::UpdateAirPhysics()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	const float3& pos = owner->pos;
@@ -827,13 +827,17 @@ void CHoverAirMoveType::UpdateAirPhysics()
 	// between model and ground)
 	// note: unlike StrafeAirMoveType, UpdateTakeoff and UpdateLanding call
 	// UpdateAirPhysics() so we ignore terrain while we are in those states
+	bool crashed = false;
 	if (modInfo.allowAircraftToHitGround) {
 		const bool cpGroundContact = (cpGroundHeight > ownerMinHeight);
 		const bool bpGroundContact = (bpGroundHeight > ownerMinHeight);
 		const bool   handleContact = (aircraftState != AIRCRAFT_LANDED && aircraftState != AIRCRAFT_TAKEOFF);
 
-		// hard avoidance in case soft constraint fails
-		if (cpGroundContact && handleContact)
+		if (cpGroundContact && aircraftState == AIRCRAFT_CRASHING)
+			// avoid moving up since explosion would look a bit off
+			crashed = true;
+		else if (cpGroundContact && handleContact)
+			// hard avoidance in case soft constraint fails
 			owner->Move(UpVector * (cpGroundHeight - ownerMinHeight + 0.01f), true);
 
 		// soft avoidance
@@ -872,6 +876,8 @@ void CHoverAirMoveType::UpdateAirPhysics()
 
 	if (modInfo.allowAircraftToLeaveMap || (pos + spd).IsInBounds())
 		owner->Move(spd, true);
+
+	return crashed;
 }
 
 
@@ -881,8 +887,23 @@ void CHoverAirMoveType::UpdateMoveRate()
 	int curMoveRate = 1;
 
 	// currentspeed is not used correctly for vertical movement, so compensate with this hax
-	if (aircraftState != AIRCRAFT_LANDING && aircraftState != AIRCRAFT_TAKEOFF)
-		curMoveRate = CalcScriptMoveRate(owner->speed.w, 3.0f);
+	if (aircraftState != AIRCRAFT_LANDING && aircraftState != AIRCRAFT_TAKEOFF) {
+		const auto res = CalcScriptMoveRate(owner->speed.w, maxSpeed, 3.0f);
+		if likely(!math::isnan(res)) {
+			curMoveRate = res;
+		} else {
+			LOG_L(L_WARNING, "[%s] Unit(id=%d, def=%s). Incorrect inputs to %s(%f, %f, %f), sanitized to %d",
+				__func__,
+				owner->id,
+				owner->unitDef->name.c_str(),
+				"CalcScriptMoveRate",
+				owner->speed.w,
+				maxSpeed,
+				3.0f,
+				lastMoveRate
+			);
+		}
+	}
 
 	if (curMoveRate == lastMoveRate)
 		return;
@@ -958,9 +979,8 @@ bool CHoverAirMoveType::Update()
 			UpdateHovering();
 			break;
 		case AIRCRAFT_CRASHING: {
-			UpdateAirPhysics();
-
-			if ((CGround::GetHeightAboveWater(owner->pos.x, owner->pos.z) + 5.0f + owner->radius) > owner->pos.y) {
+			if (UpdateAirPhysics()
+					|| (CGround::GetHeightAboveWater(owner->pos.x, owner->pos.z) + 5.0f + owner->radius) > owner->pos.y){
 				owner->ForcedKillUnit(nullptr, true, false, -CSolidObject::DAMAGE_AIRCRAFT_CRASHED);
 			} else {
 				#define SPIN_DIR(o) ((o->id & 1) * 2 - 1)

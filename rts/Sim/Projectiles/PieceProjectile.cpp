@@ -11,7 +11,7 @@
 #include "Rendering/Colors.h"
 #include "Rendering/Env/Particles/ProjectileDrawer.h"
 #include "Rendering/Env/Particles/Classes/SmokeTrailProjectile.h"
-#include "Rendering/Models/3DModel.h"
+#include "Rendering/Models/3DModelPiece.hpp"
 #include "Sim/Misc/GlobalSynced.h"
 #include "Sim/Misc/ModInfo.h"
 #include "Sim/Projectiles/ExplosionGenerator.h"
@@ -66,7 +66,16 @@ CPieceProjectile::CPieceProjectile(
 			cegID = guRNG.NextInt(ud->GetPieceExpGenCount());
 			cegID = ud->GetPieceExpGenID(cegID);
 
-			explGenHandler.GenExplosion(cegID, pos, speed, 100, 0.0f, 0.0f, nullptr, nullptr);
+			explGenHandler.GenExplosion(
+				cegID,
+				pos,
+				speed,
+				100.0f,
+				0.0f,
+				0.0f,
+				nullptr,
+				ExplosionHitObject()
+			);
 		}
 
 		model = owner->model;
@@ -149,8 +158,7 @@ void CPieceProjectile::Collision(CUnit* unit, CFeature* feature)
 			.damages              = damageArray,
 			.weaponDef            = nullptr,
 			.owner                = owner(),
-			.hitUnit              = unit,
-			.hitFeature           = feature,
+			.hitObject            = ExplosionHitObject(unit, feature),
 			.craterAreaOfEffect   = modInfo.debrisDamage * 0.25f,
 			.damageAreaOfEffect   = modInfo.debrisDamage * 0.5f,
 			.edgeEffectiveness    = 0.0f,
@@ -220,7 +228,16 @@ void CPieceProjectile::Update()
 
 	if ((explFlags & PF_NoCEGTrail) == 0) {
 		// TODO: pass a more sensible ttl to the CEG (age-related?)
-		explGenHandler.GenExplosion(cegID, pos, speed, 100, 0.0f, 0.0f, nullptr, nullptr);
+		explGenHandler.GenExplosion(
+			cegID,
+			pos,
+			speed,
+			100,
+			0.0f,
+			0.0f,
+			nullptr,
+			ExplosionHitObject()
+		);
 		return;
 	}
 
@@ -277,7 +294,7 @@ void CPieceProjectile::Draw()
 	if ((explFlags & PF_Fire) == 0)
 		return;
 
-	static const SColor lightOrange(1.f, 0.78f, 0.59f, 0.2f);
+	static constexpr SColor lightOrange(1.f, 0.78f, 0.59f, 0.2f);
 
 	for (unsigned int age = 0; age < NUM_TRAIL_PARTS; ++age) {
 		const float3 interPos = fireTrailPoints[age].pos;
@@ -288,7 +305,8 @@ void CPieceProjectile::Draw()
 		const SColor col = lightOrange * alpha;
 
 		const auto eft = projectileDrawer->explofadetex;
-		AddEffectsQuad(
+		AddEffectsQuad<0>(
+			eft->pageNum,
 			{ interPos - camera->GetRight() * drawsize - camera->GetUp() * drawsize, eft->xstart, eft->ystart, col },
 			{ interPos + camera->GetRight() * drawsize - camera->GetUp() * drawsize, eft->xend,   eft->ystart, col },
 			{ interPos + camera->GetRight() * drawsize + camera->GetUp() * drawsize, eft->xend,   eft->yend,   col },

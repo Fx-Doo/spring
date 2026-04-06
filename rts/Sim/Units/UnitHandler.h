@@ -26,7 +26,9 @@ public:
 
 	void DeleteScripts();
 
+	void UpdatePreFrame();
 	void Update();
+	void UpdatePostAnimation();
 	bool AddUnit(CUnit* unit);
 
 	bool CanAddUnit(int id) const {

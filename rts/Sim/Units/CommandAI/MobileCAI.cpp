@@ -22,6 +22,7 @@
 #include "Sim/Units/Scripts/UnitScript.h"
 #include "Sim/Weapons/Weapon.h"
 #include "Sim/Weapons/WeaponDef.h"
+#include "Rendering/Models/3DModel.hpp"
 #include "System/Log/ILog.h"
 #include "System/EventHandler.h"
 #include "System/SpringMath.h"
@@ -440,8 +441,8 @@ void CMobileCAI::ExecuteLoadOnto(Command& c) {
 		return;
 	}
 
-	if (!inCommand) {
-		inCommand = true;
+	if (inCommand == CMD_STOP) {
+		inCommand = CMD_LOAD_UNITS;
 		// order transport to load <owner> before resuming its own queue
 		transport->commandAI->commandQue.push_front(Command(CMD_LOAD_UNITS, INTERNAL_ORDER | SHIFT_KEY, owner->id));
 	}
@@ -499,7 +500,7 @@ void CMobileCAI::ExecuteFight(Command& c)
 			if ((newTarget != nullptr) && w->Attack(SWeaponTarget(newTarget, false))) {
 				c.SetParam(0, newTarget->id);
 
-				inCommand = false;
+				inCommand = CMD_STOP;
 			}
 		}
 
@@ -508,7 +509,7 @@ void CMobileCAI::ExecuteFight(Command& c)
 	}
 
 	if (tempOrder) {
-		inCommand = true;
+		inCommand = CMD_FIGHT;
 		tempOrder = false;
 	}
 	if (c.GetNumParams() < 3) {
@@ -516,7 +517,7 @@ void CMobileCAI::ExecuteFight(Command& c)
 		return;
 	}
 	if (c.GetNumParams() >= 6) {
-		if (!inCommand)
+		if (inCommand == CMD_STOP)
 			commandPos1 = c.GetPos(3);
 
 	} else {
@@ -533,8 +534,8 @@ void CMobileCAI::ExecuteFight(Command& c)
 
 	float3 cmdPos = c.GetPos(0);
 
-	if (!inCommand) {
-		inCommand = true;
+	if (inCommand == CMD_STOP) {
+		inCommand = CMD_FIGHT;
 		commandPos2 = cmdPos;
 		lastUserGoal = commandPos2;
 	}
@@ -556,7 +557,7 @@ void CMobileCAI::ExecuteFight(Command& c)
 			// NOTE: see AirCAI::ExecuteFight why we do not set INTERNAL_ORDER
 			commandQue.push_front(Command(CMD_ATTACK, c.GetOpts(), enemy->id));
 
-			inCommand = false;
+			inCommand = CMD_STOP;
 			tempOrder = true;
 
 			if (lastCommandFrame == gs->frameNum)
@@ -622,10 +623,6 @@ void CMobileCAI::ExecuteGuard(Command& c)
 		StopMoveAndFinishCommand();
 		return;
 	}
-	if (guardee->outOfMapTime > (GAME_SPEED * 5)) {
-		StopMoveAndFinishCommand();
-		return;
-	}
 
 	constexpr int retaliationTimeout = 40;
 	const bool pushAttackCommand =
@@ -641,27 +638,57 @@ void CMobileCAI::ExecuteGuard(Command& c)
 		return;
 	}
 
-	const float3 dif = (guardee->pos - owner->pos).SafeNormalize();
-	const float3 goal = guardee->pos - dif * (guardee->radius + owner->radius + 64.0f);
-	const bool resetGoal =
-		((owner->moveType->goalPos - goal).SqLength2D() > 1600.0f) ||
-		(owner->moveType->goalPos - owner->pos).SqLength2D() < Square(owner->moveType->GetMaxSpeed() * GAME_SPEED + 1 + SQUARE_SIZE * 2);
+	constexpr float epsilonish = 1.0f * INV_GAME_SPEED;
+	const float sqrRecalculateThreshold = modInfo.guardRecalculateThreshold;
+	const float sqrStoppedProximityGoal = modInfo.guardStoppedProximityGoal;
+	const float stoppedExtraDistanceOffset = modInfo.guardStoppedExtraDistance;
+	const float sqrMovingProximityGoal = modInfo.guardMovingProximityGoal;
+	const float movingIntervalMultiplier = modInfo.guardMovingIntervalMultiplier;
+	const float maxTimeToIntercept = modInfo.guardInterceptionLimit;
 
-	if (resetGoal)
-		SetGoal(goal, owner->pos);
+	float3 goalPos = owner->pos;
+	float3 deltaPos = guardee->pos - owner->pos;
+	const float sqrGuardDistance = deltaPos.SqLength2D();
 
-	if ((goal - owner->pos).SqLength2D() < 6400.0f) {
-		StartSlowGuard(guardee->moveType->GetMaxSpeed());
+	auto resetGoalIfNeeded = [&](const float3& newGoalPos) {
+		// No idea what exactly this is for, best not to touch until investigated.
+		static constexpr float MAGIC_RECALC_CONSTANT = 1 + SQUARE_SIZE * 2;
+		if (((owner->moveType->goalPos - newGoalPos).SqLength2D() > sqrRecalculateThreshold) ||
+		    (owner->moveType->goalPos - owner->pos).SqLength2D() < Square(owner->moveType->GetMaxSpeed() * GAME_SPEED + MAGIC_RECALC_CONSTANT)) {
+			SetGoal(newGoalPos, owner->pos);
+		}
+	};
 
-		if ((goal - owner->pos).SqLength2D() < 1800.0f) {
+	const bool guardeeStopped = guardee->speed.w < epsilonish;
+	if (guardeeStopped) {
+		const float3 guardeeDirection = deltaPos.SafeNormalize2D();
+		const float stoppedDistance = guardee->radius + owner->radius + stoppedExtraDistanceOffset;
+		goalPos = guardee->pos - guardeeDirection * stoppedDistance;
+		if (goalPos.SqDistance2D(owner->pos) < sqrStoppedProximityGoal) {
 			StopMove();
 			NonMoving();
+			return;
 		}
 
+		resetGoalIfNeeded(goalPos);
 		return;
 	}
 
-	StopSlowGuard();
+	const bool inGuardingRange = sqrGuardDistance < sqrMovingProximityGoal;
+	if (inGuardingRange) {
+		StartSlowGuard(guardee->speed.w);
+		goalPos = owner->pos + guardee->speed * movingIntervalMultiplier * GAME_SPEED;
+	} else { // If we are too far away, move towards the predicted position of the guardee
+		const float ownerSpeed = owner->speed.w;
+		float timeToIntercept = 0.0f;
+		if (ownerSpeed > epsilonish) {
+			timeToIntercept = math::sqrt(sqrGuardDistance) / ownerSpeed;
+		}
+		goalPos = guardee->pos + guardee->speed * std::min(timeToIntercept, maxTimeToIntercept);
+		StopSlowGuard();
+	}
+
+	resetGoalIfNeeded(goalPos);
 }
 
 
@@ -680,6 +707,7 @@ void CMobileCAI::ExecuteObjectAttack(Command& c)
 	RECOIL_DETAILED_TRACY_ZONE;
 	bool tryTargetRotate  = false;
 	bool tryTargetHeading = false;
+	bool tryOwnerRotation = false; // if a weapon doesn't swivel to aim we've got to know about it to rotate the owner instead
 
 	float edgeFactor = 0.0f; // percent offset to target center
 
@@ -719,8 +747,10 @@ void CMobileCAI::ExecuteObjectAttack(Command& c)
 
 		edgeFactor = math::fabs(w->weaponDef->targetBorder);
 
-		if (tryTargetRotate || tryTargetHeading)
+		if (tryTargetRotate)
 			break;
+
+		tryOwnerRotation |= w->WantOwnerRotation();
 	}
 
 	// if w->AttackUnit() returned true then we are already
@@ -756,7 +786,7 @@ void CMobileCAI::ExecuteObjectAttack(Command& c)
 
 	// target is probably close enough
 	if (targetMidPosDist2D < (owner->maxRange * 0.9f)) {
-		if (owner->unitDef->IsHoveringAirUnit() || (targetMidPosVec.SqLength2D() < 1024)) {
+		if (owner->unitDef->IsHoveringAirUnit() || (targetMidPosVec.SqLength2D() < 1024) || tryOwnerRotation) {
 			StopMove();
 			owner->moveType->KeepPointingTo(orderTarget->midPos, minPointingDist, true);
 			return;
@@ -793,9 +823,12 @@ void CMobileCAI::ExecuteObjectAttack(Command& c)
 		// otherwise it will move us to the exact target position which should fix issues with
 		// low-range (mainly melee) weapons
 		SetGoal(targetErrPos - norm * CalcTargetRadius(orderTarget, orderTarget->radius, edgeFactor * 0.8f), owner->pos);
+		if (lastCloseInTry < (gs->frameNum + MAX_CLOSE_IN_RETRY_TICKS)) {
+			if (tryOwnerRotation)
+				owner->moveType->KeepPointingTo(orderTarget->midPos, minPointingDist, true);
 
-		if (lastCloseInTry < (gs->frameNum + MAX_CLOSE_IN_RETRY_TICKS))
 			lastCloseInTry = gs->frameNum;
+		}
 	}
 }
 
@@ -868,7 +901,7 @@ void CMobileCAI::ExecuteAttack(Command& c)
 		}
 	}
 
-	if (!inCommand) {
+	if (inCommand == CMD_STOP) {
 		switch (c.GetNumParams()) {
 			case 0: {
 			} break;
@@ -898,7 +931,7 @@ void CMobileCAI::ExecuteAttack(Command& c)
 				SetOrderTarget(targetUnit);
 				owner->AttackUnit(targetUnit, !c.IsInternalOrder(), c.GetID() == CMD_MANUALFIRE);
 
-				inCommand = true;
+				inCommand = CMD_ATTACK;
 			} break;
 
 			case 2: {
@@ -908,7 +941,7 @@ void CMobileCAI::ExecuteAttack(Command& c)
 				// user gave force-fire attack command
 				SetGoal(c.GetPos(0), owner->pos);
 
-				inCommand = true;
+				inCommand = CMD_ATTACK;
 			} break;
 		}
 	}
@@ -1357,7 +1390,7 @@ void CMobileCAI::ExecuteLoadUnits(Command& c)
 				}
 			}
 
-			if (inCommand) {
+			if (inCommand == CMD_LOAD_UNITS) {
 				if (!owner->script->IsBusy())
 					StopMoveAndFinishCommand();
 
@@ -1427,7 +1460,7 @@ void CMobileCAI::ExecuteLoadUnits(Command& c)
 						if (!eventHandler.AllowUnitTransportLoad(owner, unit, wantedPos, true))
 							return;
 
-						inCommand = true;
+						inCommand = CMD_LOAD_UNITS;
 
 						StopMove();
 						owner->script->TransportPickup(unit);
@@ -1460,7 +1493,7 @@ void CMobileCAI::ExecuteLoadUnits(Command& c)
 
 			if (unit != nullptr && owner->CanTransport(unit)) {
 				commandQue.push_front(Command(CMD_LOAD_UNITS, c.GetOpts() | INTERNAL_ORDER, unit->id));
-				inCommand = false;
+				inCommand = CMD_STOP;
 
 				SlowUpdate();
 				return;
@@ -1510,7 +1543,7 @@ void CMobileCAI::ExecuteUnloadUnits(Command& c)
 void CMobileCAI::ExecuteUnloadUnit(Command& c)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	if (inCommand) {
+	if (inCommand == CMD_UNLOAD_UNIT) {
 		if (!owner->script->IsBusy())
 			StopMoveAndFinishCommand();
 
@@ -1933,7 +1966,7 @@ void CMobileCAI::UnloadLand(Command& c)
 		if (!eventHandler.AllowUnitTransportUnload(owner, transportee, wantedPos, true))
 			return;
 
-		inCommand = true;
+		inCommand = CMD_UNLOAD_UNIT;
 
 		StopMove();
 		owner->script->TransportDrop(transportee, wantedPos);
@@ -2014,7 +2047,7 @@ void CMobileCAI::UnloadDrop(Command& c)
 			FinishCommand();
 		}
 	} else {
-		inCommand = true;
+		inCommand = CMD_UNLOAD_UNIT;
 
 		StopMove();
 		owner->script->TransportDrop(transportee, pos);
@@ -2070,7 +2103,7 @@ void CMobileCAI::UnloadLandFlood(Command& c)
 			}
 		} else {
 			// land transports
-			inCommand = true;
+			inCommand = CMD_UNLOAD_UNIT;
 
 			StopMove();
 			owner->script->TransportDrop(transportee, wantedPos);

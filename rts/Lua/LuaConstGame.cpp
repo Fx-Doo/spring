@@ -22,12 +22,17 @@
 #include "System/FileSystem/ArchiveScanner.h"
 #include "System/FileSystem/FileSystem.h"
 #include "System/StringUtil.h"
+#include "Rendering/Fonts/FontHandler.h"
 
 /******************************************************************************
  * Game constants
  * @see rts/Lua/LuaConstGame.cpp
 ******************************************************************************/
 
+/* TODO:
+ * - Inline these declarations (place each above the specific line they are pushed into the constant.
+ * - There are many missing (for example modInfo related ones)
+ */
 /*** Game specific information
  *
  * @table Game
@@ -36,7 +41,7 @@
  * @field maxPlayers number
  * @field squareSize number Divide Game.mapSizeX or Game.mapSizeZ by this to get engine's "mapDims" coordinates. The resolution of height, yard and type maps.
  * @field metalMapSquareSize number The resolution of metalmap (for use in API such as Spring.GetMetalAmount etc.)
- * @field gameSpeed number
+ * @field gameSpeed number Number of simulation gameframes per second
  * @field startPosType number
  * @field ghostedBuildings boolean
  * @field mapChecksum string
@@ -112,6 +117,7 @@
  *       ["crawlingbombs"]= 10, ...
  *     }
  * ```
+ * @field textColorCodes TextColorCode Table containing keys that represent the color code operations during font rendering
  */
 
 bool LuaConstGame::PushEntries(lua_State* L)
@@ -191,15 +197,15 @@ bool LuaConstGame::PushEntries(lua_State* L)
 		LuaPushNamedNumber(L, "multiReclaim"                  , modInfo.multiReclaim);
 		LuaPushNamedNumber(L, "reclaimMethod"                 , modInfo.reclaimMethod);
 		LuaPushNamedNumber(L, "reclaimUnitMethod"             , modInfo.reclaimUnitMethod);
-		LuaPushNamedNumber(L, "reclaimUnitEnergyCostFactor"   , modInfo.reclaimUnitEnergyCostFactor);
-		LuaPushNamedNumber(L, "reclaimUnitEfficiency"         , modInfo.reclaimUnitEfficiency);
-		LuaPushNamedNumber(L, "reclaimFeatureEnergyCostFactor", modInfo.reclaimFeatureEnergyCostFactor);
+		LuaPushNamedNumber(L, "reclaimUnitEnergyCostFactor"   , modInfo.reclaimUnitCostFactor.energy);
+		LuaPushNamedNumber(L, "reclaimUnitEfficiency"         , modInfo.reclaimUnitEfficiency.metal);
+		LuaPushNamedNumber(L, "reclaimFeatureEnergyCostFactor", modInfo.reclaimFeatureCostFactor.energy);
 		LuaPushNamedBool  (L, "reclaimUnitDrainHealth"        , modInfo.reclaimUnitDrainHealth);
 		LuaPushNamedBool  (L, "reclaimAllowEnemies"           , modInfo.reclaimAllowEnemies);
 		LuaPushNamedBool  (L, "reclaimAllowAllies"            , modInfo.reclaimAllowAllies);
-		LuaPushNamedNumber(L, "repairEnergyCostFactor"        , modInfo.repairEnergyCostFactor);
-		LuaPushNamedNumber(L, "resurrectEnergyCostFactor"     , modInfo.resurrectEnergyCostFactor);
-		LuaPushNamedNumber(L, "captureEnergyCostFactor"       , modInfo.captureEnergyCostFactor);
+		LuaPushNamedNumber(L, "repairEnergyCostFactor"        , modInfo.repairCostFactor.energy);
+		LuaPushNamedNumber(L, "resurrectEnergyCostFactor"     , modInfo.resurrectCostFactor.energy);
+		LuaPushNamedNumber(L, "captureEnergyCostFactor"       , modInfo.captureCostFactor.energy);
 
 		// Despite being bools, these are exposed to Lua as 0/1 for legacy reasons
 		LuaPushNamedNumber(L, "transportAir"   , modInfo.transportAir);
@@ -214,6 +220,8 @@ bool LuaConstGame::PushEntries(lua_State* L)
 		LuaPushNamedNumber(L, "paralyzeDeclineRate", modInfo.paralyzeDeclineRate);
 
 		LuaPushNamedBool  (L, "allowEnginePlayerlist", modInfo.allowEnginePlayerlist);
+		/*** @field Game.nativeExcessSharing boolean whether the engine handles excess resources overflow */
+		LuaPushNamedBool  (L, "nativeExcessSharing", modInfo.nativeExcessSharing);
 	}
 
 	if (archiveScanner != nullptr && mapInfo != nullptr) {
@@ -324,11 +332,13 @@ bool LuaConstGame::PushEntries(lua_State* L)
 	}
 	{
 		// inline color-codes for text fonts
+		bool newIndicators = fontHandler.disableOldColorIndicators;
+
 		lua_pushliteral(L, "textColorCodes");
 		lua_createtable(L, 0, 3);
-			LuaPushNamedChar(L, "Color"          , CglFont::ColorCodeIndicator  );
-			LuaPushNamedChar(L, "ColorAndOutline", CglFont::ColorCodeIndicatorEx);
-			LuaPushNamedChar(L, "Reset"          , CglFont::ColorResetIndicator );
+			LuaPushNamedChar(L, "Color"          , static_cast<char>(newIndicators ? CglFont::ColorCodeIndicator : CglFont::OldColorCodeIndicator)  );
+			LuaPushNamedChar(L, "ColorAndOutline", static_cast<char>(newIndicators ? CglFont::ColorCodeIndicatorEx : CglFont::OldColorCodeIndicatorEx));
+			LuaPushNamedChar(L, "Reset"          , static_cast<char>(CglFont::ColorResetIndicator) );
 		lua_rawset(L, -3);
 	}
 

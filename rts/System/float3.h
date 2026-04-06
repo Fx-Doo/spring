@@ -12,6 +12,7 @@
 #include "lib/streflop/streflop_cond.h"
 #include "System/creg/creg_cond.h"
 #include "System/FastMath.h"
+#include "System/type2.h"
 #ifdef _MSC_VER
 #include "System/Platform/Win/win32.h"
 #endif
@@ -335,14 +336,22 @@ public:
 
 
 	/**
-	 * @brief binary float3 equality
+	 * @brief float3 equality
 	 * @param f float3 to compare to
-	 * @return const whether the two float3 are binary same
+	 * @return const whether the two float3 are same
 	 *
 	 */
 	bool same(const float3& f) const {
 		return x == f.x && y == f.y && z == f.z;
 	}
+
+	/**
+	 * @brief binary float3 equality
+	 * @param f float3 to compare to
+	 * @return const whether the two float3 are binary same
+	 *
+	 */
+	bool binarySame(const float3& f) const;
 
 	/**
 	 * @brief dot product
@@ -409,6 +418,7 @@ public:
 
 	template<bool synced>
 	float3 rotate(float angle, const float3& axis) const {
+		assert(axis.Normalized());
 		float ca;
 		float sa;
 		if constexpr (synced) {
@@ -502,6 +512,23 @@ public:
 	float distance2D(const float3& f) const {
 		const float dx = x - f.x;
 		const float dz = z - f.z;
+		return math::sqrt(dx*dx + dz*dz);
+	}
+
+	/**
+	 * @brief distance2D between float3 and float2 (only x and z)
+	 * @param f float2 to compare against
+	 * @return 2D distance between float3s
+	 *
+	 * Calculates the distance between this float3
+	 * and another float2 2-dimensionally (that is,
+	 * only using the x and z components).  Sums the
+	 * differences in the x and z components, square
+	 * root for pythagorean theorem
+	 */
+	float distance2D(const float2& f) const {
+		const float dx = x - f.x;
+		const float dz = z - f.y;
 		return math::sqrt(dx*dx + dz*dz);
 	}
 
@@ -808,6 +835,7 @@ public:
 	static float3 fabs(const float3 v);
 	static float3 sign(const float3 v);
 
+	static constexpr float apx_eps() { return 1e-02f; }
 	static constexpr float cmp_eps() { return 1e-04f; }
 	static constexpr float nrm_eps() { return 1e-12f; }
 

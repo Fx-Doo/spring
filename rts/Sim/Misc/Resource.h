@@ -14,11 +14,10 @@ struct SResourcePack {
 	union {
 		float res[MAX_RESOURCES];
 		struct { float metal, energy; };
-		struct { float res1, res2; };
 	};
 
 public:
-	SResourcePack() : res1(0.0f), res2(0.0f) {}
+	SResourcePack() : metal(0.0f), energy(0.0f) {}
 	SResourcePack(const float value) : metal(value), energy(value) {}
 	SResourcePack(const float m, const float e) : metal(m), energy(e) {}
 	CR_DECLARE_STRUCT(SResourcePack)
@@ -37,8 +36,10 @@ public:
 		return *this;
 	}
 
-	decltype(std::begin(res)) begin() { return std::begin(res); }
-	decltype(std::end(res)) end() { return std::end(res); }
+	auto begin()       { return std::begin(res); }
+	auto   end()       { return std::  end(res); }
+	auto begin() const { return std::begin(res); }
+	auto   end() const { return std::  end(res); }
 
 	float& operator[](const size_t i) {
 		return res[i];
@@ -122,8 +123,11 @@ struct SResourceOrder {
 	//! handle resources separate, i.e. when metal storage is full still allow energy one to be filled?
 	bool separate;
 
+	//! should the income multiplier be applied
+	bool useIncomeMultiplier;
+
 public:
-	SResourceOrder() : quantum(false), overflow(false), separate(false) {}
+	SResourceOrder() : quantum(false), overflow(false), separate(false), useIncomeMultiplier(true) {}
 	CR_DECLARE_STRUCT(SResourceOrder)
 };
 

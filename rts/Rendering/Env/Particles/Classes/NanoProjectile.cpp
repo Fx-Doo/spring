@@ -100,7 +100,8 @@ void CNanoProjectile::Draw()
 	}
 
 	const auto* gfxt = projectileDrawer->gfxtex;
-	AddEffectsQuad(
+	AddEffectsQuad<0>(
+		gfxt->pageNum,
 		{ drawPos + bounds[0], gfxt->xstart, gfxt->ystart, color },
 		{ drawPos + bounds[1], gfxt->xend  , gfxt->ystart, color },
 		{ drawPos + bounds[2], gfxt->xend  , gfxt->yend  , color },
@@ -126,8 +127,8 @@ bool CNanoProjectile::GetMemberInfo(SExpGenSpawnableMemberInfo& memberInfo)
 	if (CProjectile::GetMemberInfo(memberInfo))
 		return true;
 
-	CHECK_MEMBER_INFO_INT   (CNanoProjectile, deathFrame)
-	CHECK_MEMBER_INFO_SCOLOR(CNanoProjectile, color     )
+	CHECK_MEMBER_INFO_INT   (CNanoProjectile, deathFrame);
+	CHECK_MEMBER_INFO_SCOLOR(CNanoProjectile, color     );
 
 	return false;
 }

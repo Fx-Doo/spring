@@ -9,7 +9,7 @@
 #include "Map/ReadMap.h"
 #include "Sim/Ecs/Registry.h"
 #include "Sim/Misc/QuadField.h"
-#include "Sim/Units/CommandAI/BuilderCAI.h"
+#include "Sim/Units/CommandAI/BuilderCaches.h"
 #include "System/creg/STL_Set.h"
 #include "System/EventHandler.h"
 #include "System/TimeProfiler.h"
@@ -128,6 +128,7 @@ void CFeatureHandler::InsertActiveFeature(CFeature* feature)
 	assert(features[feature->id] == nullptr);
 
 	activeFeatureIDs.insert(feature->id);
+
 	features[feature->id] = feature;
 }
 
@@ -185,7 +186,14 @@ CFeature* CFeatureHandler::CreateWreckage(const FeatureLoadParams& cparams)
 	return (LoadFeature(params));
 }
 
+void CFeatureHandler::UpdatePreFrame()
+{
+	SCOPED_TIMER("Sim::Features::UpdatePreFrame");
 
+	for (auto fid : activeFeatureIDs) {
+		features[fid]->UpdatePrevFrameTransform();
+	}
+}
 
 void CFeatureHandler::Update()
 {
@@ -209,7 +217,7 @@ void CFeatureHandler::Update()
 bool CFeatureHandler::TryFreeFeatureID(int id)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	if (CBuilderCAI::IsFeatureBeingReclaimed(id)) {
+	if (CBuilderCaches::IsFeatureBeingReclaimed(id)) {
 		// postpone putting this ID back into the free pool
 		// (this gives area-reclaimers time to choose a new
 		// target with a different ID)

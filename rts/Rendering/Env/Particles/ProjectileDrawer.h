@@ -7,10 +7,10 @@
 
 #include "Sim/Projectiles/Projectile.h"
 #include "Rendering/GL/myGL.h"
+#include "Rendering/GL/RenderBuffers.h"
 #include "Rendering/GL/FBO.h"
 #include "Rendering/Shaders/ShaderHandler.h"
 #include "Rendering/Shaders/Shader.h"
-#include "Rendering/Models/3DModel.h"
 #include "Rendering/Models/ModelRenderContainer.h"
 #include "Rendering/DepthBufferCopy.h"
 #include "System/EventClient.h"
@@ -73,7 +73,7 @@ public:
 	bool CanDrawSoften() {
 		return
 			CheckSoftenExt() &&
-			fxShaders[1] && fxShaders[1]->IsValid() &&
+			fxShader && fxShader->IsValid() &&
 			depthBufferCopy->IsValid(false);
 	};
 
@@ -127,6 +127,9 @@ public:
 public:
 	static bool CanDrawProjectile(const CProjectile* pro, int allyTeam);
 	static bool ShouldDrawProjectile(const CProjectile* pro, uint8_t thisPassMask);
+
+	static TypedRenderBuffer<VA_TYPE_C>& GetMiniMapLinesRB();
+	static TypedRenderBuffer<VA_TYPE_C>& GetMiniMapPointsRB();
 private:
 	static void ParseAtlasTextures(const bool, const LuaTable&, spring::unordered_set<std::string>&, CTextureAtlas*);
 
@@ -158,8 +161,8 @@ private:
 
 	std::vector<const AtlasedTexture*> smokeTextures;
 
-	/// projectiles container {modelless, model}
-	std::array<std::vector<CProjectile*>, 2> renderProjectiles;
+	/// projectiles container
+	std::vector<CProjectile*> renderProjectiles;
 
 	/// projectiles with a model, binned by model type and textures
 	std::array<ModelRenderContainer<CProjectile>, MODELTYPE_CNT> modelRenderers;
@@ -169,8 +172,8 @@ private:
 
 	bool drawSorted = true;
 
-	std::array<Shader::IProgramObject*, 2> fxShaders = { nullptr };
-	Shader::IProgramObject* fsShadowShader = nullptr;
+	Shader::IProgramObject* fxShader = nullptr;
+	Shader::IProgramObject* fxShadowShader = nullptr;
 
 	constexpr static int WANT_SOFTEN_COUNT = 2;
 	int wantSoften = 0;
@@ -178,6 +181,10 @@ private:
 	bool wantDrawOrder = true;
 
 	std::unique_ptr<ScopedDepthBufferCopy> sdbc;
+
+	// Instance members to ensure proper cleanup during Kill() before OpenGL context is destroyed
+	TypedRenderBuffer<VA_TYPE_C> minimapLinesRB{ 1 << 12, 0 };
+	TypedRenderBuffer<VA_TYPE_C> minimapPointsRB{ 1 << 14, 0 };
 };
 
 extern CProjectileDrawer* projectileDrawer;

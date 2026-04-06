@@ -1,6 +1,7 @@
 /* This file is part of the Spring engine (GPL v2 or later), see LICENSE.html */
 
 #include "System/Matrix44f.h"
+#include "System/Quaternion.h"
 #include "System/SpringMath.h"
 #ifndef UNIT_TEST
 	#include "Rendering/GlobalRendering.h"
@@ -10,8 +11,7 @@
 #include <algorithm>
 #include <cstring>
 
-#include <xmmintrin.h>
-#include <emmintrin.h>
+#include "System/simd_compat.h"
 
 CR_BIND(CMatrix44f, )
 
@@ -55,8 +55,8 @@ bool CMatrix44f::IsOrthoNormal() const
 	const float3 dots = {xdir.dot(ydir), ydir.dot(zdir), xdir.dot(zdir)};
 	const float3 lens = {xdir.SqLength(), ydir.SqLength(), zdir.SqLength()};
 
-	constexpr float3 epsd = {float3::cmp_eps() *  8.0f, float3::cmp_eps() *  8.0f, float3::cmp_eps() *  8.0f};
-	constexpr float3 epsl = {float3::cmp_eps() * 16.0f, float3::cmp_eps() * 16.0f, float3::cmp_eps() * 16.0f};
+	constexpr float3 epsd = {float3::cmp_eps() *  64.0f, float3::cmp_eps() *  64.0f, float3::cmp_eps() *  64.0f};
+	constexpr float3 epsl = {float3::cmp_eps() * 128.0f, float3::cmp_eps() * 128.0f, float3::cmp_eps() * 128.0f};
 
 	bool on  = dots.equals(ZeroVector, epsd);
 	     on &= lens.equals(OnesVector, epsl);
@@ -68,6 +68,16 @@ bool CMatrix44f::IsIdentity() const
 {
 	static constexpr CMatrix44f IDENTITY = CMatrix44f();
 	return (*this) == IDENTITY;
+}
+
+bool CMatrix44f::IsRotMatrix() const
+{
+	return IsOrthoNormal() && math::fabs(1.0f - Det4()) <= 64.0f * float3::cmp_eps();
+}
+
+bool CMatrix44f::IsRotOrRotTranMatrix() const
+{
+	return IsOrthoNormal() && math::fabs(1.0f - Det3()) <= 64.0f * float3::cmp_eps();
 }
 
 float CMatrix44f::Det3() const
@@ -434,7 +444,7 @@ CMatrix44f CMatrix44f::operator+(const CMatrix44f& mat) const
 		r[i + 2] = m[i + 2] + mat[i + 2];
 		r[i + 3] = m[i + 3] + mat[i + 3];
 	}
-#else //brings spring's Matrix44 on par with Eigen in terms of perfomance
+#else //brings spring's Matrix44 on par with Eigen in terms of performance
 	#define ADD_COLUMN(col) \
 		 _mm_store_ps(&r.md[col][0], _mm_add_ps(_mm_load_ps(&md[col][0]), _mm_load_ps(&mat.md[col][0])))
 
@@ -534,6 +544,45 @@ CMatrix44f CMatrix44f::InvertAffine() const
 	CMatrix44f mInv(*this);
 	mInv.InvertAffineInPlace();
 	return mInv;
+}
+
+/// <summary>
+/// Decompose a transformation matrix into translate, rotation (Quaternion), scale components
+/// </summary>
+std::tuple<float3, CQuaternion, float3> CMatrix44f::DecomposeIntoTRS() const
+{
+	CMatrix44f tmpMat = *this;
+	float4& t0 = tmpMat.col[0];
+	float4& t1 = tmpMat.col[1];
+	float4& t2 = tmpMat.col[2];
+
+	const float4& c0 = col[0];
+	const float4& c1 = col[1];
+	const float4& c2 = col[2];
+	const float4& c3 = col[3];
+
+	const float d = tmpMat.Det3();
+	const float s = Sign(d);
+
+	float3 scaling{ s * c0.Length(), c1.Length(), c2.Length() };
+
+	assert(
+		!epscmp(scaling[0], 0.0f, float3::cmp_eps()) &&
+		!epscmp(scaling[1], 0.0f, float3::cmp_eps()) &&
+		!epscmp(scaling[2], 0.0f, float3::cmp_eps())
+	);
+
+	t0 /= scaling[0];
+	t1 /= scaling[1];
+	t2 /= scaling[2];
+
+	assert(tmpMat.IsRotOrRotTranMatrix());
+
+	return std::make_tuple(
+		float3(c3.x, c3.y, c3.z),       //translate
+		CQuaternion::MakeFrom(tmpMat),  //rotate (quat)
+		scaling                         //scale
+	);
 }
 
 

@@ -19,6 +19,7 @@
 #include "Map/ReadMap.h"
 
 #include "Sim/Ecs/Registry.h"
+#include "Sim/Features/Feature.h"
 #include "Sim/Features/FeatureDef.h"
 #include "Sim/Features/FeatureDefHandler.h"
 #include "Sim/Features/FeatureHandler.h"
@@ -121,13 +122,13 @@ void CUnitLoader::ParseAndExecuteGiveUnitsCommand(const std::vector<std::string>
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	if (args.size() < 2) {
-		LOG_L(L_WARNING, "[%s] not enough arguments (\"/give [amount] <objectName | 'all'> [team] [@x, y, z]\")", __FUNCTION__);
+		LOG_L(L_WARNING, "[%s] not enough arguments (\"/give [amount] <objectName | 'all'> [team] [@x,y,z]\")", __FUNCTION__);
 		return;
 	}
 
 	float3 pos;
-	if (sscanf(args[args.size() - 1].c_str(), "@%f, %f, %f", &pos.x, &pos.y, &pos.z) != 3) {
-		LOG_L(L_WARNING, "[%s] invalid position argument (\"/give [amount] <objectName | 'all'> [team] [@x, y, z]\")", __FUNCTION__);
+	if (sscanf(args[args.size() - 1].c_str(), "@%f,%f,%f", &pos.x, &pos.y, &pos.z) != 3) {
+		LOG_L(L_WARNING, "[%s] invalid position argument (\"/give [amount] <objectName | 'all'> [team] [@x,y,z]\")", __FUNCTION__);
 		return;
 	}
 
@@ -221,7 +222,7 @@ void CUnitLoader::GiveUnits(const std::string& objectName, float3 pos, int amoun
 				true,
 			};
 
-			LoadUnit(unitParams);
+			auto* unit = LoadUnit(unitParams);
 		}
 	} else {
 		unsigned int numRequestedUnits = amount;
@@ -281,7 +282,7 @@ void CUnitLoader::GiveUnits(const std::string& objectName, float3 pos, int amoun
 						true,
 					};
 
-					LoadUnit(unitParams);
+					auto* unit = LoadUnit(unitParams);
 				}
 			}
 
@@ -329,8 +330,7 @@ void CUnitLoader::GiveUnits(const std::string& objectName, float3 pos, int amoun
 						0, // smokeTime
 					};
 
-					featureHandler.LoadFeature(params);
-
+					auto* feature = featureHandler.LoadFeature(params);
 					--total;
 				}
 			}

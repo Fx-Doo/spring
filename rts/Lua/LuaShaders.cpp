@@ -57,6 +57,7 @@ bool LuaShaders::PushEntries(lua_State* L)
 
 	REGISTER_LUA_CFUNC(GetEngineUniformBufferDef);
 	REGISTER_LUA_CFUNC(GetEngineModelUniformDataDef);
+	REGISTER_LUA_CFUNC(GetEngineModelUniformDataSize);
 
 	REGISTER_LUA_CFUNC(SetUnitBufferUniforms);
 	REGISTER_LUA_CFUNC(SetFeatureBufferUniforms);
@@ -549,7 +550,7 @@ GLint LuaShaders::GetUniformLocation(LuaShaders::Program* p, const char* name)
 	return iter->second.location;
 }
 
-/**
+/***
  * A table of uniform name to value.
  * 
  * The Uniforms are the values you send along with the shader-program. To use
@@ -565,18 +566,18 @@ GLint LuaShaders::GetUniformLocation(LuaShaders::Program* p, const char* name)
  * ```
  * 
  * @class UniformParam<T> : { [string]: T|T[] }
+ * @x_helper
  */
 
 /***
  * @class ShaderParams
+ * @x_helper
  * 
- * @field vertex string?
- * 
- * The "Vetex" or vertex-shader is your GLSL-Code as string, its written in a
+ * The "Vertex" or vertex-shader is your GLSL-Code as string, its written in a
  * C-Dialect.  This shader is busy deforming the geometry of a unit but it can
  * not create new polygons. Use it for waves, wobbling surfaces etc.
- * 
- * @field tcs string?
+ *
+ * @field vertex string?
  * 
  * The "TCS" or Tesselation Control Shader controls how much tessellation a
  * particular patch gets; it also defines the size of a patch, thus allowing it
@@ -584,29 +585,31 @@ GLint LuaShaders::GetUniformLocation(LuaShaders::Program* p, const char* name)
  * The main purpose of the TCS is to feed the tessellation levels to the
  * Tessellation primitive generator stage, as well as to feed patch data (as its
  * output values) to the Tessellation Evaluation Shader stage.
- * 
- * @field tes string?
+ *
+ * @field tcs string?
  * 
  * The "TES" or Tesselation Evaluation Shader takes the abstract patch generated
  * by the tessellation primitive generation stage, as well as the actual vertex
  * data for the entire patch, and generates a particular vertex from it. Each
  * TES invocation generates a single vertex. It can also take per-patch data
  * provided by the Tessellation Control Shader.
- * 
- * @field geometry string?
+ *
+ * @field tes string?
  * 
  * The "Geometry" or Geometry-shader can create new vertices and vertice-stripes
  * from points.
  * 
- * @field fragment string?
+ * @field geometry string?
  * 
  * The "Fragment" or Fragment-shader (sometimes called pixel-Shader) is post
- * processing the allready rendered picture (for example drawing stars on the
+ * processing the already rendered picture (for example drawing stars on the
  * sky).
  * 
  * Remember textures are not always 2 dimensional pictures. They can contain
  * information about the depth, or the third value marks areas and the strength
  * at which these are processed.
+ * 
+ * @field fragment string?
  * 
  * @field uniform UniformParam<number>?
  * @field uniformInt UniformParam<integer>?
@@ -780,7 +783,9 @@ int LuaShaders::CreateShader(lua_State* L)
 
 	// note: index, not raw ID
 	lua_pushnumber(L, shaders.AddProgram(p));
-	return 1;
+	// also push the program ID
+	lua_pushnumber(L, prog);
+	return 2;
 }
 
 
@@ -801,7 +806,7 @@ int LuaShaders::DeleteShader(lua_State* L)
 }
 
 
-/*** Binds a shader program identified by shaderID. Pass 0 to disable the shader. Returns wether the shader was successfully bound.
+/*** Binds a shader program identified by shaderID. Pass 0 to disable the shader. Returns whether the shader was successfully bound.
  *
  * @function gl.UseShader
  * @param shaderID integer
@@ -919,6 +924,7 @@ static const char* UniformTypeString(GLenum type)
 
 /***
  * @class ActiveUniform
+ * @x_helper
  * @field name string
  * @field type string String name of `GL_*` constant.
  * @field length integer The character length of `name`.
@@ -1012,7 +1018,7 @@ namespace {
 		if (o == nullptr)
 			luaL_error(L, "gl.%s() Invalid %s id (%d)", func, &spring::TypeToCStr<T>()[1], id);
 
-		ModelUniformData& uni = modelsUniformsStorage.GetObjUniformsArray(o);
+		ModelUniformData& uni = modelUniformsStorage.GetObjUniformsArray(o);
 
 		std::array<float, ModelUniformData::MAX_MODEL_UD_UNIFORMS> floatArray = {0};
 		int size = LuaUtils::ParseFloatArray(L, 2, floatArray.data(), ModelUniformData::MAX_MODEL_UD_UNIFORMS);
@@ -1210,7 +1216,7 @@ int LuaShaders::UniformArray(lua_State* L)
  *
  * @function gl.UniformMatrix
  * @param locationID integer|string uniformName
- * @param matrix "shadows"|"camera"|"caminv"|"camprj" Name of common matrix.
+ * @param matrix MatrixName Name of common matrix.
  */
 
 /***
@@ -1222,7 +1228,7 @@ int LuaShaders::UniformArray(lua_State* L)
  * numbers for the matrix.
  *
  * @function gl.UniformMatrix
- * @param locationID number|string uniformName
+ * @param locationID integer|string uniformName
  * @param matrix number[] A 2x2, 3x3 or 4x4 matrix.
  */
 int LuaShaders::UniformMatrix(lua_State* L)
@@ -1341,12 +1347,35 @@ int LuaShaders::GetEngineModelUniformDataDef(lua_State* L)
 	return 1;
 }
 
+/***
+ *
+ * @function gl.GetEngineModelUniformDataSize
+ *
+ * Return the current size values of ModelUniformData structure (per Unit/Feature buffer available on GPU)
+ *
+ * @param index number
+ * @return number sizeInElements
+ * @return number sizeInBytesOnCPU
+
+ */
+int LuaShaders::GetEngineModelUniformDataSize(lua_State* L)
+{
+	if (!globalRendering->haveGL4)
+		return 0;
+
+	const auto sizeInElems = modelUniformsStorage.GetSize();
+	lua_pushinteger(L, static_cast<lua_Integer>(sizeInElems                           ));
+	lua_pushinteger(L, static_cast<lua_Integer>(sizeInElems * sizeof(ModelUniformData)));
+
+	return 2;
+}
+
 /*** Sets the Geometry shader parameters for shaderID. Needed by geometry shader programs (check the opengl GL_ARB_geometry_shader4 extension for glProgramParameteri)
  *
  * @function gl.SetGeometryShaderParameter
  * @param shaderID integer
- * @param param number
- * @param number number
+ * @param key number
+ * @param value number
  * @return nil
  */
 int LuaShaders::SetGeometryShaderParameter(lua_State* L)

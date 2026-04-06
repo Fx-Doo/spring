@@ -5,7 +5,6 @@
 
 #include <vector>
 
-#include "Rendering/Icon.h"
 #include "Sim/Misc/GlobalConstants.h"
 #include "Sim/Misc/GuiSoundSet.h"
 #include "Sim/Objects/SolidObject.h"
@@ -13,7 +12,7 @@
 #include "System/float3.h"
 #include "System/UnorderedMap.hpp"
 
-#define MAX_UNITDEF_EXPGEN_IDS 32
+static constexpr uint32_t MAX_UNITDEF_EXPGEN_IDS = 32;
 
 
 struct Command;
@@ -45,7 +44,8 @@ struct UnitDefWeapon {
 
 	bool fastAutoRetargeting = false; ///< pick new targets as soon as possible, don't wait for slow update
 	bool fastQueryPointUpdate = false;	///< check in with unitscript to get most current query piece before every friendly fire check, don't wait for slow update
-	unsigned int burstControlWhenOutOfArc = 0; ///< Determines how to handle burst fire, when target is out of arc. 0 = no restrictions (deafult), 1 = don't fire, 2 = fire in current direction of weapon 
+	unsigned int accurateLeading = 0;	///< Accurately lead moving targets. The number controls how many calculation iterations are done. 0 = undershoot approaching or retreating targets (default), 1 = sufficient for exact solution for non-parabolic shots and improves parabolic shots, 2+ = extra iterations for parabolic shots
+	unsigned int burstControlWhenOutOfArc = 0; ///< Determines how to handle burst fire, when target is out of arc. 0 = no restrictions (default), 1 = don't fire, 2 = fire in current direction of weapon 
 	float weaponAimAdjustPriority = 1.f;		///< relative importance of picking enemy targets that are in front
 
 
@@ -123,13 +123,13 @@ public:
 
 	SResourcePack upkeep;
 	SResourcePack resourceMake; ///< will always be created
-	float makesMetal;		///< metal will be created when unit is on and enough energy can be drained
+	SResourcePack makesResources; ///< resources will be created when unit is on and upkeep can be paid
 	float buildTime;
 	float buildeeBuildRadius; ///< if >= 0.f, override default radius to use for the buildee in build distance calculations.
 	float extractsMetal;
 	float extractRange;
-	float windGenerator;
-	float tidalGenerator;
+	SResourcePack windGenerator;
+	SResourcePack tidalGenerator;
 	SResourcePack storage;
 	SResourcePack harvestStorage;
 
@@ -168,6 +168,7 @@ public:
 	float seismicSignature;
 	bool stealth;
 	bool sonarStealth;
+	bool leavesGhost;
 
 	bool  buildRange3D;
 	float buildDistance;
@@ -262,7 +263,7 @@ public:
 	const WeaponDef* selfdExpWeaponDef;
 
 	mutable UnitDefImage* buildPic;
-	mutable icon::CIcon iconType;
+	mutable std::string iconName;
 
 	int selfDCountdown;
 

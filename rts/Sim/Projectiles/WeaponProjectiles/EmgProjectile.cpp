@@ -55,7 +55,16 @@ void CEmgProjectile::Update()
 		intensity -= 0.1f;
 		intensity = std::max(intensity, 0.0f);
 	} else {
-		explGenHandler.GenExplosion(cegID, pos, speed, ttl, intensity, 0.0f, owner(), nullptr);
+		explGenHandler.GenExplosion(
+			cegID,
+			pos,
+			speed,
+			ttl,
+			intensity,
+			0.0f,
+			owner(),
+			ExplosionHitObject()
+		);
 	}
 
 	UpdateGroundBounce();
@@ -70,7 +79,7 @@ void CEmgProjectile::Draw()
 	if (!validTextures[0])
 		return;
 
-	UpdateWeaponAnimParams();
+	UpdateAnimParams();
 
 	const uint8_t col[4] {
 		(uint8_t)(color.x * intensity * 255),
@@ -81,7 +90,8 @@ void CEmgProjectile::Draw()
 
 	const auto* tex = weaponDef->visuals.texture1;
 
-	AddWeaponEffectsQuad<1>(
+	AddEffectsQuad<1>(
+		tex->pageNum,
 		{ drawPos - camera->GetRight() * drawRadius - camera->GetUp() * drawRadius, tex->xstart, tex->ystart, col },
 		{ drawPos + camera->GetRight() * drawRadius - camera->GetUp() * drawRadius, tex->xend,   tex->ystart, col },
 		{ drawPos + camera->GetRight() * drawRadius + camera->GetUp() * drawRadius, tex->xend,   tex->yend,   col },

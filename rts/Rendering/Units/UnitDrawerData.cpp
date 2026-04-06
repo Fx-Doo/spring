@@ -39,11 +39,16 @@ CR_REG_METADATA(GhostSolidObject, (
 	CR_MEMBER(modelName),
 
 	CR_MEMBER(pos),
+	CR_MEMBER(midPos),
 	CR_MEMBER(dir),
+	CR_MEMBER(radius),
+	CR_MEMBER(iconRadius),
+
+	CR_MEMBER(refCount),
 
 	CR_MEMBER(facing),
 	CR_MEMBER(team),
-	CR_MEMBER(refCount),
+	CR_IGNORED(currentIconIndex),
 
 	CR_IGNORED(model),
 
@@ -120,6 +125,9 @@ CUnitDrawerData::CUnitDrawerData(bool& mtModelDrawer_)
 	iconFadeVanish = configHandler->GetFloat("UnitIconFadeVanish");
 	useScreenIcons = configHandler->GetBool("UnitIconsAsUI");
 	iconHideWithUI = configHandler->GetBool("UnitIconsHideWithUI");
+	ghostIconDimming = configHandler->GetFloat("UnitGhostIconsDimming");
+
+	configHandler->NotifyOnChange(this, {"UnitGhostIconsDimming"});
 
 	unitDefImages.clear();
 	unitDefImages.resize(unitDefHandler->NumUnitDefs() + 1);
@@ -144,23 +152,28 @@ CUnitDrawerData::~CUnitDrawerData()
 			auto& lgb = savedData.liveGhostBuildings[allyTeam][modelType];
 			auto& dgb = savedData.deadGhostBuildings[allyTeam][modelType];
 
-			for (auto it = dgb.begin(); it != dgb.end(); ++it) {
-				GhostSolidObject* gso = *it;
-
-				if (gso->DecRef())
+			for (auto& gso : dgb) {
+				auto* tmpGso = std::exchange(gso, nullptr);
+				if (tmpGso->DecRef())
 					continue;
 
 				// <ghost> might be the gbOwner of a decal; groundDecals is deleted after us
-				groundDecals->GhostDestroyed(gso);
-				ghostMemPool.free(gso);
+				groundDecals->GhostDestroyed(tmpGso);
+				ghostMemPool.free(tmpGso);
 			}
-
 			dgb.clear();
 			lgb.clear();
 		}
 	}
+	assert(ghostMemPool.allocs() == 0);
+	ghostMemPool.clear();
 
-	unitsByIcon.clear();
+	configHandler->RemoveObserver(this);
+}
+
+void CUnitDrawerData::ConfigNotify(const std::string& key, const std::string& value)
+{
+	ghostIconDimming = configHandler->GetFloat("UnitGhostIconsDimming");
 }
 
 void CUnitDrawerData::Update()
@@ -231,73 +244,48 @@ void CUnitDrawerData::UpdateGhostedBuildings()
 				}
 
 				// obtained LOS on the ghost of a dead building
-				if (!gso->DecRef()) {
-					groundDecals->GhostDestroyed(gso);
-					ghostMemPool.free(gso);
-				}
-
-				dgb[i] = dgb.back();
-				dgb.pop_back();
+				RemoveDeadGhost(gso, dgb, i); // swaps element with last so counter shouldn't be increased.
 			}
 		}
 	}
 }
 
-const icon::CIconData* CUnitDrawerData::GetUnitIcon(const CUnit* unit)
-{
-	RECOIL_DETAILED_TRACY_ZONE;
-	const unsigned short losStatus = unit->losStatus[gu->myAllyTeam];
-	const unsigned short prevMask = (LOS_PREVLOS | LOS_CONTRADAR);
-
-	const UnitDef* unitDef = unit->unitDef;
-	const icon::CIconData* iconData = nullptr;
-
-	// use the unit's custom icon if we can currently see it,
-	// or have seen it before and did not lose contact since
-	bool unitVisible = ((losStatus & (LOS_INLOS | LOS_INRADAR)) && ((losStatus & prevMask) == prevMask));
-	unitVisible |= gameSetup->ghostedBuildings && unit->unitDef->IsBuildingUnit() && (losStatus & LOS_PREVLOS);
-	const bool customIcon = (unitVisible || gu->spectatingFullView);
-
-	if (customIcon)
-		return (unitDef->iconType.GetIconData());
-
-	if ((losStatus & LOS_INRADAR) != 0)
-		iconData = icon::iconHandler.GetDefaultIconData();
-
-	return iconData;
-}
-
-void CUnitDrawerData::UpdateUnitDefMiniMapIcons(const UnitDef* ud)
+void CUnitDrawerData::UpdateUnitIconsByUnitDef(const UnitDef* ud)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	for (int teamNum = 0; teamNum < teamHandler.ActiveTeams(); teamNum++) {
-		for (const CUnit* unit : unitHandler.GetUnitsByTeamAndDef(teamNum, ud->id)) {
-			UpdateUnitIcon(unit, true, false);
+		for (auto* unit : unitHandler.GetUnitsByTeamAndDef(teamNum, ud->id)) {
+			UpdateCurrentUnitIcon(unit);
 		}
 	}
 }
 
-void CUnitDrawerData::UpdateUnitIcon(const CUnit* unit, bool forced, bool killed)
+void CUnitDrawerData::UpdateCurrentUnitIcon(const CUnit* unit)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	CUnit* u = const_cast<CUnit*>(unit);
+	const unsigned short losStatus = unit->losStatus[gu->myAllyTeam];
+	constexpr unsigned short inLosOrRad = (LOS_INLOS | LOS_INRADAR);
+	constexpr unsigned short prevMask = (LOS_PREVLOS | LOS_CONTRADAR);
 
-	icon::CIconData* oldIcon = unit->myIcon;
-	icon::CIconData* newIcon = const_cast<icon::CIconData*>(GetUnitIcon(unit));
+	// use the unit's custom icon if we can currently see it,
+	// or have seen it before and did not lose contact since
+	bool unitVisible =
+		(losStatus & inLosOrRad) != 0 &&
+		(losStatus & prevMask) == prevMask ||
+		gameSetup->ghostedBuildings && unit->leavesGhost && (losStatus & LOS_PREVLOS) != 0;
 
-	u->myIcon = nullptr;
+	const bool typedIcon = (unitVisible || gu->spectatingFullView);
 
-	if (!killed) {
-		if ((oldIcon != newIcon) || forced) {
-			spring::VectorErase(unitsByIcon[oldIcon], unit);
-			unitsByIcon[newIcon].push_back(unit);
-		}
-
-		u->myIcon = newIcon;
-		return;
+	if (typedIcon) {
+		unit->currentIconIndex =
+			(unit->customIconIndex != icon::INVALID_ICON_INDEX) ? unit->customIconIndex : icon::iconHandler.GetIconIdxOrDefault(unit->definedIconName);
 	}
-
-	spring::VectorErase(unitsByIcon[oldIcon], unit);
+	else if ((losStatus & LOS_INRADAR) != 0) {
+		unit->currentIconIndex = icon::iconHandler.GetDefaultIconIdx();
+	}
+	else {
+		unit->currentIconIndex = icon::INVALID_ICON_INDEX;
+	}
 }
 
 void CUnitDrawerData::UpdateUnitIconState(CUnit* unit)
@@ -330,21 +318,20 @@ void CUnitDrawerData::UpdateUnitIconStateScreen(CUnit* unit)
 		return;
 	}
 
-	if (unit->health <= 0 || unit->beingBuilt || unit->noDraw || unit->IsInVoid())
+	if (unit->currentIconIndex == icon::INVALID_ICON_INDEX || unit->health <= 0 || unit->beingBuilt || unit->noDraw || unit->IsInVoid())
 	{
 		unit->SetIsIcon(false);
 		return;
 	}
 
 	const unsigned short losStatus = unit->losStatus[gu->myAllyTeam];
-	bool useDefaultIcon = (unit->myIcon == icon::iconHandler.GetDefaultIconData());
 
-	const icon::CIconData* iconData = useDefaultIcon ? icon::iconHandler.GetDefaultIconData() : unit->unitDef->iconType.GetIconData();
+	const auto& iconData = icon::iconHandler.GetIconData(unit->currentIconIndex);
 
-	float iconSizeMult = iconData->GetSize();
-	if (iconData->GetRadiusAdjust() && !useDefaultIcon)
-		iconSizeMult *= (unit->radius / iconData->GetRadiusScale());
-	iconSizeMult = (iconSizeMult - 1) * 0.75 + 1;
+	float iconSizeMult = iconData.GetSize();
+	if (iconData.GetRadiusAdjust())
+		iconSizeMult *= (unit->radius / iconData.GetRadiusScale());
+	iconSizeMult = iconSizeMult * 0.75f + 0.25f;
 
 	float limit = iconSizeBase / 2 * iconSizeMult;
 
@@ -371,13 +358,12 @@ void CUnitDrawerData::UpdateUnitIconStateScreen(CUnit* unit)
 void CUnitDrawerData::UpdateDrawPos(CUnit* u)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	const CUnit* t = u->GetTransporter();
 
-	if (t != nullptr) {
-		u->drawPos = u->preFramePos + t->GetDrawDeltaPos(globalRendering->timeOffset);
+	if (const CUnit* t = u->GetTransporter(); t != nullptr) {
+		u->drawPos = u->GetDrawPosOther(t->preFrameTra.t, t->pos, globalRendering->timeOffset);
 	}
 	else {
-		u->drawPos = u->preFramePos + u->GetDrawDeltaPos(globalRendering->timeOffset);
+		u->drawPos = u->GetDrawPos(globalRendering->timeOffset);
 	}
 
 	u->drawMidPos = u->GetMdlDrawMidPos();
@@ -458,7 +444,7 @@ void CUnitDrawerData::UpdateObjectDrawFlags(CSolidObject* o) const
 bool CUnitDrawerData::DrawAsIconByDistance(const CUnit* unit, const float sqUnitCamDist) const
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	const float sqIconDistMult = unit->unitDef->iconType->GetDistanceSqr();
+	const auto& sqIconDistMult = icon::iconHandler.GetIconData(unit->currentIconIndex).GetDistanceSq();
 	const float realIconLength = iconLength * sqIconDistMult;
 
 	if (useDistToGroundForIcons)
@@ -504,7 +490,7 @@ void CUnitDrawerData::SetUnitDefImage(const UnitDef* unitDef, const std::string&
 		}
 	}
 
-	unitImage->textureID = bitmap.CreateTexture(TextureCreationParams{
+	unitImage->textureID = bitmap.CreateTexture(GL::TextureCreationParams{
 		.aniso = 0.0f,
 		.lodBias = 0.0f,
 		.texID = 0,
@@ -582,7 +568,72 @@ void CUnitDrawerData::RenderUnitCreated(const CUnit* unit, int cloaked)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	assert(std::find(unsortedObjects.begin(), unsortedObjects.end(), unit) != unsortedObjects.end());
-	UpdateUnitIcon(unit, false, false);
+	UpdateCurrentUnitIcon(unit);
+}
+
+S3DModel* CUnitDrawerData::GetUnitModel(const CUnit* unit) const
+{
+	const UnitDef* unitDef = unit->unitDef;
+	const UnitDef* decoyDef = unitDef->decoyDef;
+
+	// FIXME -- adjust decals for decoys? gets weird?
+	S3DModel* gsoModel = (decoyDef == nullptr) ? unit->model : decoyDef->LoadModel();
+	return gsoModel;
+}
+
+bool CUnitDrawerData::UpdateUnitGhosts(const CUnit* unit, const bool addNewGhost)
+{
+	if (!gameSetup->ghostedBuildings)
+		return false;
+
+	bool addedOwnAllyTeam = false;
+	CUnit* u = const_cast<CUnit*>(unit);
+
+	// TODO - make ghosted buildings per allyTeam - so they are correctly dealt with
+	// when spectating
+	GhostSolidObject* gso = nullptr;
+	S3DModel* gsoModel = GetUnitModel(unit);
+
+	for (int allyTeam = 0; allyTeam < savedData.deadGhostBuildings.size(); ++allyTeam) {
+		const bool canSeeGhost = !(u->losStatus[allyTeam] & (LOS_INLOS | LOS_CONTRADAR | LOS_INRADAR)) && (u->losStatus[allyTeam] & (LOS_PREVLOS));
+
+		if (addNewGhost && canSeeGhost) {
+			if (gso == nullptr) {
+				gso = ghostMemPool.alloc<GhostSolidObject>();
+
+				gso->pos = u->pos;
+				gso->midPos = u->midPos;
+				gso->modelName = gsoModel->name;
+				gso->refCount = 0;
+				gso->facing = u->buildFacing;
+				gso->dir = u->frontdir;
+				gso->team = u->team;
+				gso->radius = u->radius;
+				gso->GetModel();
+
+				// gso is a shared object, we can't rely on the u->currentIconIndex being representative in case the team changes
+				gso->currentIconIndex = icon::iconHandler.GetIconIdxOrDefault(unit->definedIconName);
+
+				gso->iconRadius = u->iconRadius;
+
+				groundDecals->GhostCreated(u, gso);
+
+			}
+
+			// <gso> can be inserted for multiple allyteams
+			// (the ref-counter saves us come deletion time)
+			savedData.deadGhostBuildings[allyTeam][gsoModel->type].push_back(gso);
+			gso->IncRef();
+
+			u->losStatus[allyTeam] &= ~LOS_PREVLOS;
+			if (allyTeam == gu->myAllyTeam)
+				addedOwnAllyTeam = true;
+
+		}
+
+		spring::VectorErase(savedData.liveGhostBuildings[allyTeam][MDL_TYPE(u)], u);
+	}
+	return addedOwnAllyTeam;
 }
 
 void CUnitDrawerData::RenderUnitDestroyed(const CUnit* unit)
@@ -590,46 +641,11 @@ void CUnitDrawerData::RenderUnitDestroyed(const CUnit* unit)
 	RECOIL_DETAILED_TRACY_ZONE;
 	CUnit* u = const_cast<CUnit*>(unit);
 
-	const UnitDef* unitDef = unit->unitDef;
-	const UnitDef* decoyDef = unitDef->decoyDef;
+	UpdateUnitGhosts(unit, unit->leavesGhost);
+	// must happen after UpdateUnitGhosts()
+	u->currentIconIndex = icon::INVALID_ICON_INDEX;
 
-	const bool addNewGhost = unitDef->IsBuildingUnit() && gameSetup->ghostedBuildings;
-
-	// TODO - make ghosted buildings per allyTeam - so they are correctly dealt with
-	// when spectating
-	GhostSolidObject* gso = nullptr;
-	// FIXME -- adjust decals for decoys? gets weird?
-	S3DModel* gsoModel = (decoyDef == nullptr) ? u->model : decoyDef->LoadModel();
-
-	for (int allyTeam = 0; allyTeam < savedData.deadGhostBuildings.size(); ++allyTeam) {
-		const bool canSeeGhost = !(u->losStatus[allyTeam] & (LOS_INLOS | LOS_CONTRADAR)) && (u->losStatus[allyTeam] & (LOS_PREVLOS));
-
-		if (addNewGhost && canSeeGhost) {
-			if (gso == nullptr) {
-				gso = ghostMemPool.alloc<GhostSolidObject>();
-
-				gso->pos = u->pos;
-				gso->modelName = gsoModel->name;
-				gso->facing = u->buildFacing;
-				gso->dir = u->frontdir;
-				gso->team = u->team;
-				gso->refCount = 0;
-				gso->GetModel();
-
-				groundDecals->GhostCreated(u, gso);
-			}
-
-			// <gso> can be inserted for multiple allyteams
-			// (the ref-counter saves us come deletion time)
-			savedData.deadGhostBuildings[allyTeam][gsoModel->type].push_back(gso);
-			gso->IncRef();
-		}
-
-		spring::VectorErase(savedData.liveGhostBuildings[allyTeam][MDL_TYPE(u)], u);
-	}
-
-	DelObject(unit, true);
-	UpdateUnitIcon(unit, false, true);
+	DelObject(unit, true);	
 
 	LuaObjectDrawer::SetObjectLOD(u, LUAOBJ_UNIT, 0);
 }
@@ -640,7 +656,7 @@ void CUnitDrawerData::UnitEnteredRadar(const CUnit* unit, int allyTeam)
 	if (allyTeam != gu->myAllyTeam)
 		return;
 
-	UpdateUnitIcon(unit, false, false);
+	UpdateCurrentUnitIcon(unit);
 }
 
 void CUnitDrawerData::UnitEnteredLos(const CUnit* unit, int allyTeam)
@@ -648,13 +664,13 @@ void CUnitDrawerData::UnitEnteredLos(const CUnit* unit, int allyTeam)
 	RECOIL_DETAILED_TRACY_ZONE;
 	CUnit* u = const_cast<CUnit*>(unit); //cleanup
 
-	if (gameSetup->ghostedBuildings && unit->unitDef->IsBuildingUnit())
+	if (unit->leavesGhost)
 		spring::VectorErase(savedData.liveGhostBuildings[allyTeam][MDL_TYPE(unit)], u);
 
 	if (allyTeam != gu->myAllyTeam)
 		return;
 
-	UpdateUnitIcon(unit, false, false);
+	UpdateCurrentUnitIcon(unit);
 }
 
 void CUnitDrawerData::UnitLeftLos(const CUnit* unit, int allyTeam)
@@ -662,27 +678,55 @@ void CUnitDrawerData::UnitLeftLos(const CUnit* unit, int allyTeam)
 	RECOIL_DETAILED_TRACY_ZONE;
 	CUnit* u = const_cast<CUnit*>(unit); //cleanup
 
-	if (gameSetup->ghostedBuildings && unit->unitDef->IsBuildingUnit())
+	if (unit->leavesGhost)
 		spring::VectorInsertUnique(savedData.liveGhostBuildings[allyTeam][MDL_TYPE(unit)], u, true);
 
 	if (allyTeam != gu->myAllyTeam)
 		return;
 
-	UpdateUnitIcon(unit, false, false);
+	UpdateCurrentUnitIcon(unit);
 }
 
-void CUnitDrawerData::PlayerChanged(int playerNum)
+void CUnitDrawerData::UnitLeavesGhostChanged(const CUnit* unit, const bool leaveDeadGhost)
 {
-	RECOIL_DETAILED_TRACY_ZONE;
-	if (playerNum != gu->myPlayerNum)
+	if (unit->leavesGhost) {
+		ReviewPrevLos(unit);
 		return;
-
-	for (auto& [icon, units] : unitsByIcon) {
-		units.clear();
 	}
 
-	for (CUnit* unit : unsortedObjects) {
-		// force an erase (no-op) followed by an insert
-		UpdateUnitIcon(unit, true, false);
+	if (UpdateUnitGhosts(unit, leaveDeadGhost)) {
+		// left decoy dead ghost for own team
+		UpdateCurrentUnitIcon(unit);
 	}
+}
+
+void CUnitDrawerData::ReviewPrevLos(const CUnit* unit)
+{
+	// When reinstating leavesGhost, we need to check whether the unit is still in los or
+	// contradar, and otherwise disable PREVLOS, otherwise specs will see it after going in and
+	// out of player mode.
+	for (int allyTeam = 0; allyTeam < savedData.liveGhostBuildings.size(); ++allyTeam) {
+		if (!(unit->losStatus[allyTeam] & (LOS_INLOS | LOS_CONTRADAR))) {
+			CUnit* u = const_cast<CUnit*>(unit);
+			u->losStatus[allyTeam] &= ~LOS_PREVLOS;
+		}
+	}
+}
+
+void CUnitDrawerData::PlayerChanged(int playerID)
+{
+	for (auto* unit : unsortedObjects) {
+		UpdateCurrentUnitIcon(unit);
+	}
+}
+
+void CUnitDrawerData::RemoveDeadGhost(GhostSolidObject* gso, std::vector<GhostSolidObject*>& dgb, int index)
+{
+	if (!gso->DecRef()) {
+		groundDecals->GhostDestroyed(gso);
+		ghostMemPool.free(gso);
+	}
+
+	dgb[index] = dgb.back();
+	dgb.pop_back();
 }

@@ -13,6 +13,7 @@
 #include "System/UnorderedSet.hpp"
 #include "System/type2.h"
 
+class SharedLib;
 struct SDL_version;
 struct SDL_Rect;
 struct SDL_Window;
@@ -233,6 +234,7 @@ public:
 	 * maximum 2D texture size
 	 */
 	int maxTextureSize;
+	int maxTexSlots;
 	int maxFragShSlots;
 	int maxCombShSlots;
 
@@ -287,7 +289,7 @@ public:
 	 * @brief GPU driver's vendor
 	 *
 	 * These can be used to enable workarounds for bugs in their drivers.
-	 * Note, you should always give the user the possiblity to override such workarounds via config-tags.
+	 * Note, you should always give the user the possibility to override such workarounds via config-tags.
 	 */
 	bool haveAMD;
 	bool haveMesa;
@@ -367,6 +369,17 @@ public:
 	bool borderless;
 
 	bool underExternalDebug;
+	
+	/** 
+	 * @brief Forces Window's desktop compositing before(1)/after(2) each glSwapWindow
+	*/
+	int forceDWMFlush;
+
+	#ifdef _WIN32
+		std::unique_ptr<SharedLib> dwmApiLib;
+		void* DwmGetWindowAttribute = nullptr;
+		void* DwmFlush = nullptr;
+	#endif
 public:
 	SDL_Window* sdlWindow;
 	SDL_GLContext glContext;

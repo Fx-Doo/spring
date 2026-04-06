@@ -19,6 +19,7 @@
 #include "Rendering/GL/FBO.h"
 #include "Rendering/GL/SubState.h"
 #include "Rendering/GL/RenderBuffers.h"
+#include "Rendering/Models/3DModelPiece.hpp"
 #include "Rendering/Shaders/Shader.h"
 #include "Rendering/Textures/ColorMap.h"
 #include "Rendering/Textures/TextureAtlas.h"
@@ -76,9 +77,14 @@ void CProjectileDrawer::KillStatic(bool reload) {
 	if (reload)
 		return;
 
+	// minimapLinesRB and minimapPointsRB are now instance members,
+	// destroyed by spring::SafeDestruct() below before OpenGL context is destroyed
 	spring::SafeDestruct(projectileDrawer);
 	memset(projectileDrawerMem, 0, sizeof(projectileDrawerMem));
 }
+
+TypedRenderBuffer<VA_TYPE_C>& CProjectileDrawer::GetMiniMapLinesRB() { return projectileDrawer->minimapLinesRB; }
+TypedRenderBuffer<VA_TYPE_C>& CProjectileDrawer::GetMiniMapPointsRB() { return projectileDrawer->minimapPointsRB; }
 
 void CProjectileDrawer::Init() {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -86,8 +92,8 @@ void CProjectileDrawer::Init() {
 
 	loadscreen->SetLoadMessage("Creating Projectile Textures");
 
-	textureAtlas = new CTextureAtlas(CTextureAtlas::ATLAS_ALLOC_LEGACY, 0, 0, "ProjectileTextureAtlas", true);
-	groundFXAtlas = new CTextureAtlas(CTextureAtlas::ATLAS_ALLOC_LEGACY, 0, 0, "ProjectileEffectsAtlas", true);
+	textureAtlas  = new CTextureAtlas(CTextureAtlas::ATLAS_ALLOC_MP_LEGACY, 0, 0, "ExplosFXAtlas", true);
+	groundFXAtlas = new CTextureAtlas(CTextureAtlas::ATLAS_ALLOC_MP_LEGACY, 0, 0, "GroundFXAtlas", true);
 
 	LuaParser resourcesParser("gamedata/resources.lua", SPRING_VFS_MOD_BASE, SPRING_VFS_ZIP);
 	LuaParser mapResParser("gamedata/resources_map.lua", SPRING_VFS_MAP_BASE, SPRING_VFS_ZIP);
@@ -195,8 +201,11 @@ void CProjectileDrawer::Init() {
 		ParseAtlasTextures(false, mapResGroundFXTexturesTable, blockedTexNames, groundFXAtlas);
 	}
 
-	if (!textureAtlas->Finalize())
+	if (!textureAtlas->Finalize()) {
+#ifndef HEADLESS
 		LOG_L(L_ERROR, "Could not finalize projectile-texture atlas. Use fewer/smaller textures.");
+#endif
+	}
 
 
 	flaretex        = &textureAtlas->GetTexture("flare");
@@ -274,66 +283,54 @@ void CProjectileDrawer::Init() {
 	}
 
 
-	renderProjectiles[false].reserve(projectileHandler.maxParticles + projectileHandler.maxNanoParticles);
+	renderProjectiles.reserve(projectileHandler.maxParticles + projectileHandler.maxNanoParticles);
 	for (auto& mr : modelRenderers) { mr.Clear(); }
 
 	LoadWeaponTextures();
 
-	{
-		fsShadowShader = shaderHandler->CreateProgramObject("[ProjectileDrawer::VFS]", "FX Shader shadow");
+	fxShadowShader = shaderHandler->CreateProgramObject("[ProjectileDrawer::VFS]", "FX Shader shadow");
+	fxShadowShader->AttachShaderObject(shaderHandler->CreateShaderObject("GLSL/ProjFXVertShadowProg.glsl", "", GL_VERTEX_SHADER));
+	fxShadowShader->AttachShaderObject(shaderHandler->CreateShaderObject("GLSL/ProjFXFragShadowProg.glsl", "", GL_FRAGMENT_SHADER));
+	fxShadowShader->SetFlag("USE_TEXTURE_ARRAY", false);
 
-		fsShadowShader->AttachShaderObject(shaderHandler->CreateShaderObject("GLSL/ProjFXVertShadowProg.glsl", "", GL_VERTEX_SHADER));
-		fsShadowShader->AttachShaderObject(shaderHandler->CreateShaderObject("GLSL/ProjFXFragShadowProg.glsl", "", GL_FRAGMENT_SHADER));
+	using VAT = std::decay_t<decltype(CProjectile::GetPrimaryRenderBuffer())>::VertType;
+	fxShadowShader->BindAttribLocations<VAT>();
 
-		{
-			using VAT = std::decay_t<decltype(CProjectile::GetPrimaryRenderBuffer())>::VertType;
-			fsShadowShader->BindAttribLocations<VAT>();
-		}
+	fxShadowShader->Link();
+	fxShadowShader->Enable();
 
-		fsShadowShader->Link();
-		fsShadowShader->Enable();
+	fxShadowShader->SetUniform("atlasTex", 0);
+	fxShadowShader->SetUniform("alphaCtrl", 0.0f, 1.0f, 0.0f, 0.0f);
+	fxShadowShader->SetUniform("shadowColorMode", shadowHandler.shadowColorMode > 0 ? 1.0f : 0.0f);
 
-		fsShadowShader->SetUniform("atlasTex", 0);
-		fsShadowShader->SetUniform("alphaCtrl", 0.0f, 1.0f, 0.0f, 0.0f);
-		fsShadowShader->SetUniform("shadowColorMode", shadowHandler.shadowColorMode > 0 ? 1.0f : 0.0f);
+	fxShadowShader->Disable();
+	fxShadowShader->Validate();
 
-		fsShadowShader->Disable();
-		fsShadowShader->Validate();
-	}
 
-	fxShaders[0] = shaderHandler->CreateProgramObject("[ProjectileDrawer::VFS]", "FX Shader hard");
-	fxShaders[1] = shaderHandler->CreateProgramObject("[ProjectileDrawer::VFS]", "FX Shader soft");
+	fxShader = shaderHandler->CreateProgramObject("[ProjectileDrawer::VFS]", "FX Shader");
+	fxShader->AttachShaderObject(shaderHandler->CreateShaderObject("GLSL/ProjFXVertProg.glsl", "", GL_VERTEX_SHADER));
+	fxShader->AttachShaderObject(shaderHandler->CreateShaderObject("GLSL/ProjFXFragProg.glsl", "", GL_FRAGMENT_SHADER));
+	fxShader->SetFlag("SMOOTH_PARTICLES", CheckSoftenExt());
+	fxShader->SetFlag("DEPTH_CLIP01", globalRendering->supportClipSpaceControl);
+	fxShader->SetFlag("USE_TEXTURE_ARRAY", false);
 
-	for (auto*& fxShader : fxShaders)
-	{
-		fxShader->AttachShaderObject(shaderHandler->CreateShaderObject("GLSL/ProjFXVertProg.glsl", "", GL_VERTEX_SHADER));
-		fxShader->AttachShaderObject(shaderHandler->CreateShaderObject("GLSL/ProjFXFragProg.glsl", "", GL_FRAGMENT_SHADER));
+	using VAT = std::decay_t<decltype(CProjectile::GetPrimaryRenderBuffer())>::VertType;
+	fxShader->BindAttribLocations<VAT>();
 
-		{
-			using VAT = std::decay_t<decltype(CProjectile::GetPrimaryRenderBuffer())>::VertType;
-			fxShader->BindAttribLocations<VAT>();
-		}
+	fxShader->Link();
+	fxShader->Enable();
+	fxShader->SetUniform("atlasTex", 0);
+	fxShader->SetUniform("depthTex", 15);
+	fxShader->SetUniform("softenExponent", softenExponent[0], softenExponent[1]);
+	fxShader->SetUniform("softenThreshold", softenThreshold[0]);
 
-		fxShader->SetFlag("DEPTH_CLIP01", globalRendering->supportClipSpaceControl);
-		if (fxShader == fxShaders[1])
-			fxShader->SetFlag("SMOOTH_PARTICLES", CheckSoftenExt());
+	fxShader->SetUniform("camPos", 0.0f, 0.0f, 0.0f);
+	fxShader->SetUniform("fogColor", 0.0f, 0.0f, 0.0f);
+	fxShader->SetUniform("fogParams", 0.0f, 0.0f);
 
-		fxShader->Link();
-		fxShader->Enable();
-		fxShader->SetUniform("atlasTex", 0);
-		if (fxShader == fxShaders[1]) {
-			fxShader->SetUniform("depthTex", 15);
-			fxShader->SetUniform("softenExponent", softenExponent[0], softenExponent[1]);
-		}
+	fxShader->Disable();
 
-		fxShader->SetUniform("camPos", 0.0f, 0.0f, 0.0f);
-		fxShader->SetUniform("fogColor", 0.0f, 0.0f, 0.0f);
-		fxShader->SetUniform("fogParams", 0.0f, 0.0f);
-
-		fxShader->Disable();
-
-		fxShader->Validate();
-	}
+	fxShader->Validate();
 
 	sdbc = std::make_unique<ScopedDepthBufferCopy>(false);
 
@@ -351,8 +348,7 @@ void CProjectileDrawer::Kill() {
 
 	smokeTextures.clear();
 
-	for (auto& rp : renderProjectiles)
-		rp.clear();
+	renderProjectiles.clear();
 
 	for (auto& dp : drawParticles)
 		dp.clear();
@@ -365,8 +361,8 @@ void CProjectileDrawer::Kill() {
 	drawSorted = true;
 
 	shaderHandler->ReleaseProgramObjects("[ProjectileDrawer::VFS]");
-	fxShaders = { nullptr };
-	fsShadowShader = nullptr;
+	fxShader = nullptr;
+	fxShadowShader = nullptr;
 	sdbc = nullptr;
 
 	configHandler->Set("SoftParticles", wantSoften);
@@ -375,66 +371,70 @@ void CProjectileDrawer::Kill() {
 void CProjectileDrawer::UpdateDrawFlags()
 {
 	ZoneScopedN("ProjectileDrawer::UpdateDrawFlags");
-	for (auto& rp : renderProjectiles) {
-		if (rp.empty())
-			continue;
 
-		auto hasModel = (&rp == &renderProjectiles[true]);
-		for_mt(0, rp.size(), [&rp, hasModel](int i) {
-			CProjectile* p = rp[i];
-			assert((p->model != nullptr) == hasModel);
+	for_mt(0, renderProjectiles.size(), [this](int i) {
+		CProjectile* p = renderProjectiles[i];
+		const bool hasModel = (p->model != nullptr);
 
-			p->drawPos = p->GetDrawPos(globalRendering->timeOffset);
+		p->drawPos = p->GetDrawPos(globalRendering->timeOffset);
 
-			p->previousDrawFlag = p->drawFlag;
-			p->ResetDrawFlag();
+		p->previousDrawFlag = p->drawFlag;
+		p->ResetDrawFlag();
 
-			if (!CanDrawProjectile(p, p->GetAllyteamID()))
-				return;
+		if (!CanDrawProjectile(p, p->GetAllyteamID()))
+			return;
 
-			p->SetDrawFlag(DrawFlags::SO_DRICON_FLAG); //reuse as a minimap draw indication
+		p->SetDrawFlag(DrawFlags::SO_DRICON_FLAG); //reuse as a minimap draw indication
 
-			for (uint32_t camType = CCamera::CAMTYPE_PLAYER; camType < CCamera::CAMTYPE_ENVMAP; ++camType) {
-				if (camType == CCamera::CAMTYPE_UWREFL && !IWater::GetWater()->CanDrawReflectionPass())
-					continue;
+		for (uint32_t camType = CCamera::CAMTYPE_PLAYER; camType < CCamera::CAMTYPE_ENVMAP; ++camType) {
+			if (camType == CCamera::CAMTYPE_UWREFL && !IWater::GetWater()->CanDrawReflectionPass())
+				continue;
 
-				if (camType == CCamera::CAMTYPE_SHADOW && !p->castShadow)
-					continue;
+			if (camType == CCamera::CAMTYPE_SHADOW && !p->castShadow)
+				continue;
 
-				if (camType == CCamera::CAMTYPE_SHADOW && ((shadowHandler.shadowGenBits & CShadowHandler::SHADOWGEN_BIT_PROJ) == 0))
-					continue;
+			if (camType == CCamera::CAMTYPE_SHADOW && ((shadowHandler.shadowGenBits & CShadowHandler::SHADOWGEN_BIT_PROJ) == 0))
+				continue;
 
-				const CCamera* cam = CCameraHandler::GetCamera(camType);
-				if (!cam->InView(p->drawPos, p->GetDrawRadius()))
-					continue;
+			const CCamera* cam = CCameraHandler::GetCamera(camType);
+			if (!cam->InView(p->drawPos, p->GetDrawRadius()))
+				continue;
 
-				p->SetSortDist(camType, cam->ProjectedDistance(p->drawPos));
+			p->SetSortDist(camType, cam->ProjectedDistance(p->drawPos));
 
-				switch (camType)
-				{
-					case CCamera::CAMTYPE_PLAYER: {
-						if (hasModel)
-							p->AddDrawFlag(DrawFlags::SO_OPAQUE_FLAG);
-						else
-							p->AddDrawFlag(DrawFlags::SO_ALPHAF_FLAG);
+			switch (camType)
+			{
+				case CCamera::CAMTYPE_PLAYER: {
+					if (hasModel)
+						p->AddDrawFlag(DrawFlags::SO_OPAQUE_FLAG);
+					else
+						p->AddDrawFlag(DrawFlags::SO_ALPHAF_FLAG);
 
-						if (p->drawPos.y - p->GetDrawRadius() < 0.0f)
-							p->AddDrawFlag(DrawFlags::SO_REFRAC_FLAG);
-					} break;
-					case CCamera::CAMTYPE_UWREFL: {
-						if (CModelDrawerHelper::ObjectVisibleReflection(p->drawPos, cam->GetPos(), p->GetDrawRadius()))
-							p->AddDrawFlag(DrawFlags::SO_REFLEC_FLAG);
-					} break;
-					case CCamera::CAMTYPE_SHADOW: {
-						if unlikely(hasModel)
-							p->AddDrawFlag(DrawFlags::SO_SHOPAQ_FLAG);
-						else
-							p->AddDrawFlag(DrawFlags::SO_SHTRAN_FLAG);
-					} break;
-				}
+					if (p->drawPos.y - p->GetDrawRadius() < 0.0f)
+						p->AddDrawFlag(DrawFlags::SO_REFRAC_FLAG);
+
+					// Special case of piece projectile, since it has a model and fire particle
+					if (p->piece)
+						p->AddDrawFlag(DrawFlags::SO_ALPHAF_FLAG);
+				} break;
+				case CCamera::CAMTYPE_UWREFL: {
+					if (CModelDrawerHelper::ObjectVisibleReflection(p->drawPos, cam->GetPos(), p->GetDrawRadius()))
+						p->AddDrawFlag(DrawFlags::SO_REFLEC_FLAG);
+				} break;
+				case CCamera::CAMTYPE_SHADOW: {
+					if unlikely(hasModel)
+						p->AddDrawFlag(DrawFlags::SO_SHOPAQ_FLAG);
+					else
+						p->AddDrawFlag(DrawFlags::SO_SHTRAN_FLAG);
+
+					// Special case of piece projectile, since it has a model and fire particle
+					if (p->piece)
+						p->AddDrawFlag(DrawFlags::SO_SHTRAN_FLAG);
+				} break;
 			}
-		});
-	}
+		}
+	});
+
 }
 
 bool CProjectileDrawer::CheckSoftenExt()
@@ -459,8 +459,16 @@ void CProjectileDrawer::ParseAtlasTextures(
 	textureTable.GetMap(texturesMap);
 	textureTable.GetKeys(subTables);
 
-	for (auto texturesMapIt = texturesMap.begin(); texturesMapIt != texturesMap.end(); ++texturesMapIt) {
-		const std::string textureName = StringToLower(texturesMapIt->first);
+	// Sort texture names to ensure deterministic ordering across runs
+	std::vector<std::string> sortedTexNames;
+	sortedTexNames.reserve(texturesMap.size());
+	for (const auto& [name, _] : texturesMap) {
+		sortedTexNames.emplace_back(name);
+	}
+	std::sort(sortedTexNames.begin(), sortedTexNames.end());
+
+	for (const auto& texName : sortedTexNames) {
+		const std::string textureName = StringToLower(texName);
 
 		// no textures added to this atlas are allowed
 		// to be overwritten later by other textures of
@@ -469,7 +477,7 @@ void CProjectileDrawer::ParseAtlasTextures(
 			blockedTextures.insert(textureName);
 
 		if (blockTextures || (blockedTextures.find(textureName) == blockedTextures.end()))
-			texAtlas->AddTexFromFile(texturesMapIt->first, "bitmaps/" + texturesMapIt->second);
+			texAtlas->AddTexFromFile(texName, "bitmaps/" + texturesMap[texName]);
 	}
 
 	texturesMap.clear();
@@ -482,14 +490,22 @@ void CProjectileDrawer::ParseAtlasTextures(
 
 		textureSubTable.GetMap(texturesMap);
 
-		for (auto texturesMapIt = texturesMap.begin(); texturesMapIt != texturesMap.end(); ++texturesMapIt) {
-			const std::string textureName = StringToLower(texturesMapIt->first);
+		// Sort texture names to ensure deterministic ordering across runs
+		sortedTexNames.clear();
+		sortedTexNames.reserve(texturesMap.size());
+		for (const auto& [name, _] : texturesMap) {
+			sortedTexNames.emplace_back(name);
+		}
+		std::sort(sortedTexNames.begin(), sortedTexNames.end());
+
+		for (const auto& texName : sortedTexNames) {
+			const std::string textureName = StringToLower(texName);
 
 			if (blockTextures)
 				blockedTextures.insert(textureName);
 
 			if (blockTextures || (blockedTextures.find(textureName) == blockedTextures.end()))
-				texAtlas->AddTexFromFile(texturesMapIt->first, "bitmaps/" + texturesMapIt->second);
+				texAtlas->AddTexFromFile(texName, "bitmaps/" + texturesMap[texName]);
 		}
 
 		texturesMap.clear();
@@ -595,51 +611,30 @@ bool CProjectileDrawer::ShouldDrawProjectile(const CProjectile* p, uint8_t thisP
 	return p->HasDrawFlag(static_cast<DrawFlags>(thisPassMask));
 }
 
-/*
-void CProjectileDrawer::DrawProjectileNow(CProjectile* pro, bool drawReflection, bool drawRefraction)
-{
-	pro->drawPos = pro->GetDrawPos(globalRendering->timeOffset);
-
-	if (!CanDrawProjectile(pro, pro->GetAllyteamID()))
-		return;
-
-	if (drawRefraction && (pro->drawPos.y > pro->GetDrawRadius()))
-		return;
-	// removed this to fix AMD particle drawing
-	//if (drawReflection && !CModelDrawerHelper::ObjectVisibleReflection(pro->drawPos, camera->GetPos(), pro->GetDrawRadius()))
-	//	return;
-
-	const CCamera* cam = CCameraHandler::GetActiveCamera();
-	if (!cam->InView(pro->drawPos, pro->GetDrawRadius()))
-		return;
-
-	// no-op if no model
-	if (DrawProjectileModel(pro))
-		return;
-
-	pro->SetSortDist(cam->ProjectedDistance(pro->pos));
-
-	auto lock = mutex.GetScopedLock();
-	if (drawSorted && pro->drawSorted) {
-		sortedProjectiles.emplace_back(pro);
-	} else {
-		unsortedProjectiles.emplace_back(pro);
-	}
-
-}
-*/
-
 void CProjectileDrawer::DrawProjectilesMiniMap()
 {
 	ZoneScopedN("ProjectileDrawer::DrawMiniMap");
 
-	for (auto& rp : renderProjectiles) {
-		for (CProjectile* p : rp) {
-			if (!ShouldDrawProjectile(p, DrawFlags::SO_DRICON_FLAG))
-				continue;
+	// draw opaque first
+	for (CProjectile* p : renderProjectiles) {
+		if (!p->model)
+			continue;
 
-			p->DrawOnMinimap();
-		}
+		if (!ShouldDrawProjectile(p, DrawFlags::SO_DRICON_FLAG))
+			continue;
+
+		p->DrawOnMinimap();
+	}
+
+	// draw alpha second
+	for (CProjectile* p : renderProjectiles) {
+		if (p->model)
+			continue;
+
+		if (!ShouldDrawProjectile(p, DrawFlags::SO_DRICON_FLAG))
+			continue;
+
+		p->DrawOnMinimap();
 	}
 
 	auto& sh = TypedRenderBuffer<VA_TYPE_C>::GetShader();
@@ -656,11 +651,11 @@ void CProjectileDrawer::DrawProjectilesMiniMap()
 	sh.Enable();
 	{
 		ZoneScopedN("DrawProjectilesMiniMap::MiniMapLinesRB");
-		CProjectile::GetMiniMapLinesRB().DrawArrays(GL_LINES);
+		GetMiniMapLinesRB().DrawArrays(GL_LINES);
 	}
 	{
 		ZoneScopedN("DrawProjectilesMiniMap::MiniMapPointsRB");
-		CProjectile::GetMiniMapPointsRB().DrawArrays(GL_POINTS);
+		GetMiniMapPointsRB().DrawArrays(GL_POINTS);
 	}
 	sh.Disable();
 
@@ -768,7 +763,7 @@ void CProjectileDrawer::DrawAlpha(bool drawAboveWater, bool drawBelowWater, bool
 
 	{
 		ZoneScopedN("ProjectileDrawer::DrawAlpha(DP)");
-		for (CProjectile* p : renderProjectiles[false]) {
+		for (CProjectile* p : renderProjectiles) {
 			if (!ShouldDrawProjectile(p, thisPassMask))
 				continue;
 
@@ -820,25 +815,21 @@ void CProjectileDrawer::DrawAlpha(bool drawAboveWater, bool drawBelowWater, bool
 
 		const bool needSoften = (wantSoften > 0) && !drawReflection && !drawRefraction;
 
-
 		glActiveTexture(GL_TEXTURE0); textureAtlas->BindTexture();
 
 		if (needSoften) {
 			glActiveTexture(GL_TEXTURE15); glBindTexture(GL_TEXTURE_2D, depthBufferCopy->GetDepthBufferTexture(false));
 		}
 
-		auto* fxShader = fxShaders[needSoften];
-
 		const auto camPlayer = CCameraHandler::GetCamera(CCamera::CAMTYPE_PLAYER);
 		const auto& sky = ISky::GetSky();
 
 		fxShader->Enable();
-
+		fxShader->SetFlag("SMOOTH_PARTICLES", needSoften);
+		fxShader->SetFlag("USE_TEXTURE_ARRAY", (textureAtlas->GetNumPages() > 1));
 		fxShader->SetUniform("clipPlane", clipPlane[0], clipPlane[1], clipPlane[2], clipPlane[3]);
 		fxShader->SetUniform("alphaCtrl", 0.0f, 1.0f, 0.0f, 0.0f);
-		if (needSoften) {
-			fxShader->SetUniform("softenThreshold", CProjectileDrawer::softenThreshold[0]);
-		}
+		fxShader->SetUniform("softenThreshold", CProjectileDrawer::softenThreshold[0]);
 
 		fxShader->SetUniform("camPos", camPlayer->pos.x, camPlayer->pos.y, camPlayer->pos.z);
 		fxShader->SetUniform("fogColor", sky->fogColor.x, sky->fogColor.y, sky->fogColor.z);
@@ -852,7 +843,7 @@ void CProjectileDrawer::DrawAlpha(bool drawAboveWater, bool drawBelowWater, bool
 			glBindTexture(GL_TEXTURE_2D, 0); //15th slot
 			glActiveTexture(GL_TEXTURE0);
 		}
-		glBindTexture(GL_TEXTURE_2D, 0);
+		textureAtlas->UnbindTexture();
 	}
 }
 
@@ -900,7 +891,7 @@ void CProjectileDrawer::DrawShadowTransparent()
 	// 1) Render opaque objects into depth stencil texture from light's point of view - done elsewhere
 
 	// draw the model-less projectiles
-	for (CProjectile* p : renderProjectiles[false]) {
+	for (CProjectile* p : renderProjectiles) {
 		if (!ShouldDrawProjectile(p, DrawFlags::SO_SHTRAN_FLAG))
 			continue;
 
@@ -936,12 +927,14 @@ void CProjectileDrawer::DrawShadowTransparent()
 
 	// 6) Render transparents in arbitrary order
 	textureAtlas->BindTexture();
-	fsShadowShader->Enable();
-	fsShadowShader->SetUniform("shadowColorMode", shadowHandler.shadowColorMode > 0 ? 1.0f : 0.0f);
+
+	fxShadowShader->Enable();
+	fxShadowShader->SetFlag("USE_TEXTURE_ARRAY", (textureAtlas->GetNumPages() > 1));
+	fxShadowShader->SetUniform("shadowColorMode", shadowHandler.shadowColorMode > 0 ? 1.0f : 0.0f);
 
 	rb.DrawElements(GL_TRIANGLES);
 
-	fsShadowShader->Disable();
+	fxShadowShader->Disable();
 	glBindTexture(GL_TEXTURE_2D, 0);
 
 	//shadowHandler.EnableColorOutput(false);
@@ -987,10 +980,17 @@ void CProjectileDrawer::DrawProjectileModel(const CProjectile* p)
 			}
 
 			if ((pp->explFlags & PF_Recursive) != 0) {
+				// DrawStaticLegacyRec applies bpose rotation+scale per-piece internally
 				pp->omp->DrawStaticLegacyRec();
 			}
 			else {
-				// non-recursive, only draw one piece
+				// Apply the rotation+scale from bposeTransform (but NOT translation, which is the
+				// piece's model-space offset and is irrelevant for a standalone flying piece).
+				{
+					const auto& bpose = pp->omp->bposeTransform;
+					const Transform bposeNoTrans{ bpose.r, ZeroVector, bpose.s };
+					glMultMatrixf(bposeNoTrans.ToMatrix());
+				}
 				pp->omp->DrawStaticLegacy(true, false);
 			}
 
@@ -1015,6 +1015,7 @@ void CProjectileDrawer::DrawGroundFlashes()
 	glDepthMask(GL_FALSE);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+
 	glActiveTexture(GL_TEXTURE0);
 	groundFXAtlas->BindTexture();
 /*
@@ -1037,11 +1038,16 @@ void CProjectileDrawer::DrawGroundFlashes()
 		glActiveTexture(GL_TEXTURE15); glBindTexture(GL_TEXTURE_2D, depthBufferCopy->GetDepthBufferTexture(false));
 	}
 
-	fxShaders[needSoften]->Enable();
-	fxShaders[needSoften]->SetUniform("alphaCtrl", 0.01f, 1.0f, 0.0f, 0.0f);
-	if (needSoften) {
-		fxShaders[needSoften]->SetUniform("softenThreshold", -CProjectileDrawer::softenThreshold[1]);
-	}
+	const auto camPlayer = CCameraHandler::GetCamera(CCamera::CAMTYPE_PLAYER);
+	const auto& sky = ISky::GetSky();
+
+	fxShader->Enable();
+	fxShader->SetFlag("USE_TEXTURE_ARRAY", (groundFXAtlas->GetNumPages() > 1));
+	fxShader->SetUniform("alphaCtrl", 0.01f, 1.0f, 0.0f, 0.0f);
+	fxShader->SetUniform("softenThreshold", -CProjectileDrawer::softenThreshold[1]);
+	fxShader->SetUniform("camPos", camPlayer->pos.x, camPlayer->pos.y, camPlayer->pos.z);
+	fxShader->SetUniform("fogColor", sky->fogColor.x, sky->fogColor.y, sky->fogColor.z);
+	fxShader->SetUniform("fogParams", sky->fogStart * camPlayer->GetFarPlaneDist(), sky->fogEnd * camPlayer->GetFarPlaneDist());
 
 	for (CGroundFlash* gf: gfc) {
 		const bool inLos = gf->alwaysVisible || gu->spectatingFullView || losHandler->InAirLos(gf, gu->myAllyTeam);
@@ -1074,13 +1080,14 @@ void CProjectileDrawer::DrawGroundFlashes()
 
 	rb.DrawElements(GL_TRIANGLES);
 
-	fxShaders[needSoften]->Disable();
+	fxShader->Disable();
 
 	if (needSoften) {
 		glBindTexture(GL_TEXTURE_2D, 0); //15th slot
 		glActiveTexture(GL_TEXTURE0);
 	}
-	glBindTexture(GL_TEXTURE_2D, 0);
+
+	groundFXAtlas->UnbindTexture();
 
 //	glFogfv(GL_FOG_COLOR, sky->fogColor);
 	glDisable(GL_POLYGON_OFFSET_FILL);
@@ -1220,9 +1227,10 @@ void CProjectileDrawer::GenerateNoiseTex(uint32_t tex)
 void CProjectileDrawer::RenderProjectileCreated(const CProjectile* p)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	auto& rp = renderProjectiles[p->model != nullptr];
-	const_cast<CProjectile*>(p)->SetRenderIndex(rp.size());
-	rp.push_back(const_cast<CProjectile*>(p));
+	{
+		const_cast<CProjectile*>(p)->SetRenderIndex(renderProjectiles.size());
+		renderProjectiles.push_back(const_cast<CProjectile*>(p));
+	}
 
 	if (p->model != nullptr)
 		modelRenderers[MDL_TYPE(p)].AddObject(p);
@@ -1232,15 +1240,14 @@ void CProjectileDrawer::RenderProjectileDestroyed(const CProjectile* p)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	const auto ri = p->GetRenderIndex();
-	auto& rp = renderProjectiles[p->model != nullptr];
-	if (ri >= rp.size()) {
+	if (ri >= renderProjectiles.size()) {
 		assert(false);
 		return;
 	}
 
-	rp[ri] = rp.back();
-	rp[ri]->SetRenderIndex(ri);
-	rp.pop_back();
+	renderProjectiles[ri] = renderProjectiles.back();
+	renderProjectiles[ri]->SetRenderIndex(ri);
+	renderProjectiles.pop_back();
 
 	if (p->model != nullptr)
 		modelRenderers[MDL_TYPE(p)].DelObject(p);

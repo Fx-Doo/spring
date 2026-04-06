@@ -17,9 +17,6 @@
 
 CInfoTextureHandler::CInfoTextureHandler()
 {
-	if (infoTextureHandler == nullptr)
-		infoTextureHandler = this;
-
 	AddInfoTexture(infoTex = new CInfoTextureCombiner());
 	AddInfoTexture(new CLosTexture());
 	AddInfoTexture(new CAirLosTexture());
@@ -28,11 +25,10 @@ CInfoTextureHandler::CInfoTextureHandler()
 	AddInfoTexture(new CRadarTexture());
 	AddInfoTexture(new CHeightTexture());
 	AddInfoTexture(new CPathTexture());
-
-	// avoid calling this here, it introduces dependencies
-	// on engine components that have not been created yet
-	// (HeightMapTexture, GuiHandler, ...)
-	// Update();
+	// TODO?
+	//AddInfoTexture(new CHeatTexture());
+	//AddInfoTexture(new CFlowTexture());
+	//AddInfoTexture(new CPathCostTexture());
 }
 
 
@@ -46,7 +42,7 @@ CInfoTextureHandler::~CInfoTextureHandler()
 }
 
 
-void CInfoTextureHandler::AddInfoTexture(CPboInfoTexture* itex)
+void CInfoTextureHandler::AddInfoTexture(CModernInfoTexture* itex)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	infoTextures[itex->GetName()] = itex;
@@ -120,6 +116,24 @@ const std::string& CInfoTextureHandler::GetMode() const
 	return (infoTex->GetMode());
 }
 
+const std::vector<std::string> CInfoTextureHandler::GetModes() const
+{
+	std::vector<string> modes;
+	modes.reserve(infoTextures.size());
+
+	for(const auto& [mode, tex]: infoTextures)
+		modes.push_back(mode);
+
+	return modes;
+}
+
+bool CInfoTextureHandler::HasMode(const std::string& name) const
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	return infoTextures.contains(name);
+}
+
+
 GLuint CInfoTextureHandler::GetCurrentInfoTexture() const
 {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -139,9 +153,7 @@ void CInfoTextureHandler::Update()
 	glActiveTexture(GL_TEXTURE0);
 	glEnable(GL_TEXTURE_2D);
 
-	for (auto& p: infoTextures) {
-		CPboInfoTexture* tex = p.second;
-
+	for (auto& [name, tex] : infoTextures) {
 		// force first update except for combiner; hides visible uninitialized texmem
 		if ((firstUpdate && tex != infoTex) || tex->IsUpdateNeeded())
 			tex->Update();

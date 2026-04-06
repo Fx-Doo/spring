@@ -19,7 +19,7 @@
 
 local SAFEWRAP = 0
 -- 0: disabled
--- 1: enabled, but can be overriden by gadget.GetInfo().unsafe
+-- 1: enabled, but can be overridden by gadget.GetInfo().unsafe
 -- 2: always enabled
 
 
@@ -1847,6 +1847,36 @@ end
 function gadgetHandler:ActiveCommandChanged(id, cmdType)
   for _,g in r_ipairs(self.ActiveCommandChangedList) do
     g:ActiveCommandChanged(id, cmdType)
+  end
+end
+
+function gadgetHandler:CameraRotationChanged(rotx, roty, rotz)
+  for _,g in r_ipairs(self.CameraRotationChangedList) do
+    g:CameraRotationChanged(rotx, roty, rotz)
+  end
+end
+
+function gadgetHandler:CameraPositionChanged(posx, posy, posz)
+  for _,g in r_ipairs(self.CameraPositionChangedList) do
+    g:CameraPositionChanged(posx, posy, posz)
+  end
+end
+
+function gadgetHandler:MiniMapRotationChanged(newRot, oldRot)
+  for _,g in r_ipairs(self.MiniMapRotationChangedList) do
+    g:MiniMapRotationChanged(newRot, oldRot)
+  end
+end
+
+function gadgetHandler:MiniMapStateChanged(isMinimized, isMaximized, isSlaved)
+  for _,g in r_ipairs(self.MiniMapStateChangedList) do
+    g:MiniMapStateChanged(isMinimized, isMaximized, isSlaved)
+  end
+end
+
+function gadgetHandler:MiniMapGeometryChanged(newPosX, newPosY, newDimX, newDimY, oldPosX, oldPosY, oldDimX, oldDimY)
+  for _,g in r_ipairs(self.MiniMapGeometryChangedList) do
+    g:MiniMapGeometryChanged(newPosX, newPosY, newDimX, newDimY, oldPosX, oldPosY, oldDimX, oldDimY)
   end
 end
 

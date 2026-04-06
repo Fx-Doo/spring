@@ -3,14 +3,15 @@
 #include <algorithm>
 #include <type_traits>
 
-#include "lib/fmt/format.h"
-#include "lib/fmt/printf.h"
+#include <fmt/format.h>
+#include <fmt/printf.h>
 
 #include "lib/sol2/sol.hpp"
 
 #include "System/SafeUtil.h"
 #include "Rendering/GL/VBO.h"
 #include "Rendering/GL/VAO.h"
+#include "Rendering/Models/3DModel.hpp"
 #include "LuaVBOImpl.h"
 
 #include "LuaUtils.h"
@@ -90,7 +91,7 @@ void LuaVAOImpl::AttachBufferImpl(const std::shared_ptr<LuaVBOImpl>& luaVBO, std
 }
 
 
-/*** Attachs a VBO to be used as a vertex buffer
+/*** Attaches a VBO to be used as a vertex buffer
  *
  * @function VAO:AttachVertexBuffer
  * @param vbo VBO
@@ -102,7 +103,7 @@ void LuaVAOImpl::AttachVertexBuffer(const LuaVBOImplSP& luaVBO)
 }
 
 
-/*** Attachs a VBO to be used as an instance buffer
+/*** Attaches a VBO to be used as an instance buffer
  *
  * @function VAO:AttachInstanceBuffer
  * @param vbo VBO
@@ -114,7 +115,7 @@ void LuaVAOImpl::AttachInstanceBuffer(const LuaVBOImplSP& luaVBO)
 }
 
 
-/*** Attachs a VBO to be used as an index buffer
+/*** Attaches a VBO to be used as an index buffer
  *
  * @function VAO:AttachIndexBuffer
  * @param vbo VBO
@@ -308,15 +309,15 @@ LuaVAOImpl::DrawCheckResult LuaVAOImpl::DrawCheck(GLenum mode, const DrawCheckIn
 	if (vertLuaVBO)
 		vertLuaVBO->UpdateModelsVBOElementCount(); //need to update elements count because underlyiing VBO could have been updated
 
+	result.baseIndex = std::max(inputs.baseIndex.value_or(0), 0);
+
 	if (indexed) {
 		if (!indxLuaVBO)
 			LuaUtils::SolLuaError("[LuaVAOImpl::%s]: No index buffer is attached. Did you succesfully call vao:AttachIndexBuffer()?", __func__);
 
 		indxLuaVBO->UpdateModelsVBOElementCount(); //need to update elements count because underlyiing VBO could have been updated
 
-		result.baseIndex  = std::max(inputs.baseIndex.value_or(0) , 0);
 		result.baseVertex = std::max(inputs.baseVertex.value_or(0), 0); //can't be checked easily
-
 		result.drawCount = inputs.drawCount.value_or(indxLuaVBO->elementsCount);
 		if (!inputs.drawCount.has_value() || inputs.drawCount.value() <= 0)
 			result.drawCount -= result.baseIndex; //adjust automatically

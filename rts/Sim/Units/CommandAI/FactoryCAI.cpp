@@ -152,6 +152,13 @@ static constexpr int GetCountMultiplierFromOptions(int opts)
 	return ret;
 }
 
+void CFactoryCAI::BuildeeChangeCheck()
+{
+	const auto fac = static_cast <CFactory *> (owner);
+	if (!fac->IsCurrentBuildeeMatchingBuildQueueFront(commandQue))
+		fac->StopBuild();
+}
+
 void CFactoryCAI::GiveCommandReal(const Command& c, bool fromSynced)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -273,9 +280,7 @@ void CFactoryCAI::GiveCommandReal(const Command& c, bool fromSynced)
 				}
 			}
 
-			if (!repeatOrders)
-				static_cast<CFactory*>(owner)->StopBuild();
-
+			BuildeeChangeCheck();
 		} else {
 			for (int a = 0; a < numItems; ++a) {
 				commandQue.push_back(c);
@@ -299,13 +304,10 @@ void CFactoryCAI::InsertBuildCommand(CCommandQueue::iterator& it,
 		boi->second += buildCount;
 		UpdateIconName(newCmd.GetID(), boi->second);
 	}
-	if (!commandQue.empty() && (it == commandQue.begin())) {
-		// ExecuteStop(), without the pop_front()
-		CFactory* fac = static_cast<CFactory*>(owner);
-		fac->StopBuild();
-	}
 	while (buildCount--)
 		it = commandQue.insert(it, newCmd);
+
+	BuildeeChangeCheck();
 }
 
 
@@ -397,7 +399,21 @@ void CFactoryCAI::SlowUpdate()
 			// regular order (move/wait/etc)
 			switch (c.GetID()) {
 				case CMD_STOP: {
-					ExecuteStop(c);
+					/* Targeted hack to optimize bulk STOP orders.
+					 * Build orders get replaced by STOP instead of being removed,
+					 * this is due to the buildqueue's internal implementation as `std::deque`
+					 * whose interface doesn't support removal from the middle that well.
+					 * Units often get added and removed in large quantities via CTRL/SHIFT,
+					 * such multiple STOPs commands in a row would then produce a freeze
+					 * when the engine tries to process them all in one frame.
+					 * Just execute the last in each series to ensure last build is cancelled
+					 * otherwise last unit stays being built. */
+					if (oldQueueSize == 1 || commandQue[1].GetID() != CMD_STOP) {
+						ExecuteStop(c);
+					} else {
+						commandQue.pop_front();
+					}
+
 				} break;
 				default: {
 					CCommandAI::SlowUpdate();

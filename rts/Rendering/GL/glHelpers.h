@@ -10,7 +10,7 @@
 #include <array>
 
 
-// Get gl parameter values into a homogenous GL-typed variable (single or array)
+// Get gl parameter values into a homogeneous GL-typed variable (single or array)
 // Must pass expectedValuesN to convert from GLint to other integer types (GLenum, GLsizei and such)
 template<class GLType>
 inline void glGetAny(GLenum paramName, GLType* data, const int expectedValuesN = 1)
@@ -88,12 +88,16 @@ inline ResultTupleType FetchEffectualStateAttribValues(ParamName paramName)
 	return resultTuple;
 }
 
-inline GLuint FetchCurrentSlotTextureID(GLenum target) {
+inline GLuint FetchCurrentSlotBoundTextureID(GLenum target) {
 	GLenum query = GL::GetBindingQueryFromTarget(target);
 	assert(query);
 	GLuint currentSlotTextureID;
 	glGetAny(query, &currentSlotTextureID, 1);
 	return currentSlotTextureID;
+}
+
+inline GLuint FetchActiveTextureSlot() {
+	return GL::FetchEffectualStateAttribValue<GLenum>(GL_ACTIVE_TEXTURE);
 }
 
 }

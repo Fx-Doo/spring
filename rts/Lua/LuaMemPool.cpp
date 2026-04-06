@@ -10,7 +10,7 @@
 #include "System/SafeUtil.h"
 #include "System/Log/ILog.h"
 #include "System/Threading/SpringThreading.h"
-#include "lib/fmt/printf.h"
+#include <fmt/printf.h>
 
 #include "System/Misc/TracyDefs.h"
 
@@ -24,7 +24,6 @@ static std::vector<LuaMemPool*> gPools;
 static std::vector<size_t> gIndcs;
 static std::atomic<size_t> gCount = {0};
 static spring::mutex gMutex;
-
 
 size_t LuaMemPool::GetPoolCount() { return (gCount.load()); }
 
@@ -112,27 +111,39 @@ void* LuaMemPool::Alloc(size_t size)
 	if (!LuaMemPool::enabled) {
 		allocStats[STAT_NAE] += 1 * (size > 0);
 		allocStats[STAT_NBE] += size;
+#if LUA_MEASURE_ALLOC_TIME == 1
 		auto t0 = spring_now();
+#endif
 		void* ptr = ::operator new(size);
+#if LUA_MEASURE_ALLOC_TIME == 1
 		allocStats[STAT_NTE] += (spring_now() - t0).toMicroSecsi();
+#endif
 		return ptr;
 	}
 
+#if LUA_MEASURE_ALLOC_TIME == 1
 	auto t0 = spring_now();
+#endif
 	auto* ptr = luaMemPoolImpl->allocMem(size);
 	
 	if (size > NUM_BUCKETS * BUCKET_STEP) {
 		allocStats[STAT_NAE] += 1 * (size > 0);
 		allocStats[STAT_NBE] += size;
+#if LUA_MEASURE_ALLOC_TIME == 1
 		allocStats[STAT_NTE] += (spring_now() - t0).toMicroSecsi();
+#endif
 	} else if (luaMemPoolImpl->isAllocInternal(ptr)) {
 		allocStats[STAT_NAI] += 1 * (size > 0);
 		allocStats[STAT_NBI] += size;
+#if LUA_MEASURE_ALLOC_TIME == 1
 		allocStats[STAT_NTI] += (spring_now() - t0).toMicroSecsi();
+#endif
 	} else {
 		allocStats[STAT_NAF] += 1 * (size > 0);
 		allocStats[STAT_NBF] += size;
+#if LUA_MEASURE_ALLOC_TIME == 1
 		allocStats[STAT_NTF] += (spring_now() - t0).toMicroSecsi();
+#endif
 	}
 
 	return ptr;
@@ -152,32 +163,42 @@ void* LuaMemPool::Realloc(void* ptr, size_t nsize, size_t osize)
 
 		allocStats[STAT_NBE] -= osize;
 		allocStats[STAT_NBE] += nsize;
-
+#if LUA_MEASURE_ALLOC_TIME == 1
 		auto t0 = spring_now();
+#endif
 		std::memcpy(newPtr, ptr, std::min(nsize, osize));
 		std::memset(ptr, 0, osize);
 		::operator delete(ptr);
+#if LUA_MEASURE_ALLOC_TIME == 1
 		allocStats[STAT_NTE] += (spring_now() - t0).toMicroSecsi();
+#endif
 
 		return newPtr;
 	}
-
+#if LUA_MEASURE_ALLOC_TIME == 1
 	auto t0 = spring_now();
+#endif
 	auto* ret = luaMemPoolImpl->reAllocMem(ptr, nsize);
 	if (nsize > NUM_BUCKETS * BUCKET_STEP) {
 		allocStats[STAT_NAE] += 1 * (nsize > 0);
 		allocStats[STAT_NBE] += nsize;
+#if LUA_MEASURE_ALLOC_TIME == 1
 		allocStats[STAT_NTE] += (spring_now() - t0).toMicroSecsi();
+#endif
 	}
 	else if (luaMemPoolImpl->isAllocInternal(ret)) {
 		allocStats[STAT_NAI] += 1 * (nsize > 0);
 		allocStats[STAT_NBI] += nsize;
+#if LUA_MEASURE_ALLOC_TIME == 1
 		allocStats[STAT_NTI] += (spring_now() - t0).toMicroSecsi();
+#endif
 	}
 	else {
 		allocStats[STAT_NAF] += 1 * (nsize > 0);
 		allocStats[STAT_NBF] += nsize;
+#if LUA_MEASURE_ALLOC_TIME == 1
 		allocStats[STAT_NTF] += (spring_now() - t0).toMicroSecsi();
+#endif
 	}
 	return ret;
 }
@@ -202,7 +223,7 @@ void LuaMemPool::LogStats(const char* handle, const char* lctype)
 	const float avgAllocTimeF = static_cast<float>(allocStats[STAT_NTF]) / static_cast<float>(std::max(allocStats[STAT_NAF], one));
 	const float avgAllocTimeE = static_cast<float>(allocStats[STAT_NTE]) / static_cast<float>(std::max(allocStats[STAT_NAE], one));
 	std::string msg = fmt::sprintf(
-		"[LuaMemPool::%s][handle=%s (%s)] index=%u numAllocs{int+, int-, ext, int_p}={%u, %u, %u, %.1f} allocedSize{int+, int-, ext}={%u, %u, %u}, avgAllocTime{int+, int-, ext}={%.4f, %.4f, %.4f}",
+		"[LuaMemPool::%s][handle=%s (%s)] index=%u numAllocs{int+, int-, ext, int_p}={%u, %u, %u, %.1f} allocedSize{int+, int-, ext}={%u, %u, %u}, avgAllocTime{int+, int-, ext}={%.4f, %.4f, %.4f}, cumAllocTime={int+, int-, ext}={%u, %u, %u}",
 		__func__,
 		handle,
 		lctype,
@@ -216,7 +237,10 @@ void LuaMemPool::LogStats(const char* handle, const char* lctype)
 		allocStats[STAT_NBE],
 		avgAllocTimeI,
 		avgAllocTimeF,
-		avgAllocTimeE
+		avgAllocTimeE,
+		allocStats[STAT_NTI],
+		allocStats[STAT_NTF],
+		allocStats[STAT_NTE]
 	);
 	LOG("%s", msg.c_str());
 	allocStats = {};

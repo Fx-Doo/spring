@@ -347,13 +347,15 @@ void ShieldSegmentProjectile::Draw()
 
 	const float3 shieldPos = collection->GetShieldDrawPos();
 	const float size = collection->GetSize();
+	const auto& pageNum = collection->GetShieldTexture()->pageNum;
 
 	// draw all quads
 	for (int y = 0; y < (NUM_VERTICES_Y - 1); ++y) {
 		for (int x = 0; x < (NUM_VERTICES_X - 1); ++x) {
 			const int idxTL = (y    ) * NUM_VERTICES_X + x, idxTR = (y    ) * NUM_VERTICES_X + x + 1;
 			const int idxBL = (y + 1) * NUM_VERTICES_X + x, idxBR = (y + 1) * NUM_VERTICES_X + x + 1;
-			AddEffectsQuad(
+			AddEffectsQuad<0>(
+				pageNum,
 				{ shieldPos + vertices[idxTL] * size, texCoors[idxTL].x, texCoors[idxTL].y, color },
 				{ shieldPos + vertices[idxTR] * size, texCoors[idxTR].x, texCoors[idxTR].y, color },
 				{ shieldPos + vertices[idxBR] * size, texCoors[idxBR].x, texCoors[idxBR].y, color },

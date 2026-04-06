@@ -32,7 +32,8 @@ CR_REG_METADATA_SUB(CFireBallProjectile, Spark, (
 ))
 
 
-CFireBallProjectile::CFireBallProjectile(const ProjectileParams& params): CWeaponProjectile(params)
+CFireBallProjectile::CFireBallProjectile(const ProjectileParams& params)
+	: CWeaponProjectile(params)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	projectileType = WEAPON_FIREBALL_PROJECTILE;
@@ -46,6 +47,8 @@ CFireBallProjectile::CFireBallProjectile(const ProjectileParams& params): CWeapo
 	validTextures[1] = IsValidTexture(projectileDrawer->explotex);
 	validTextures[2] = IsValidTexture(projectileDrawer->dguntex);
 	validTextures[0] = validTextures[1] || validTextures[2];
+
+	blockPreciseCol = true;
 }
 
 void CFireBallProjectile::Draw()
@@ -54,7 +57,7 @@ void CFireBallProjectile::Draw()
 	if (!validTextures[0])
 		return;
 
-	UpdateWeaponAnimParams();
+	UpdateAnimParams();
 
 	unsigned char col[4] = {255, 150, 100, 1};
 
@@ -71,7 +74,8 @@ void CFireBallProjectile::Draw()
 		col[2] = (numSparks - i) *  4;
 
 		const auto* ept = projectileDrawer->explotex;
-		AddWeaponEffectsQuad<1>(
+		AddEffectsQuad<1>(
+			ept->pageNum,
 			{ sparks[i].pos - camera->GetRight() * sparks[i].size - camera->GetUp() * sparks[i].size, ept->xstart, ept->ystart, col },
 			{ sparks[i].pos + camera->GetRight() * sparks[i].size - camera->GetUp() * sparks[i].size, ept->xend  , ept->ystart, col },
 			{ sparks[i].pos + camera->GetRight() * sparks[i].size + camera->GetUp() * sparks[i].size, ept->xend  , ept->yend  , col },
@@ -85,7 +89,8 @@ void CFireBallProjectile::Draw()
 		col[1] = (maxCol - i) * 15;
 		col[2] = (maxCol - i) * 10;
 		const auto* dgt = projectileDrawer->dguntex;
-		AddWeaponEffectsQuad<2>(
+		AddEffectsQuad<2>(
+			dgt->pageNum,
 			{ interPos - (speed * 0.5f * i) - camera->GetRight() * size - camera->GetUp() * size, dgt->xstart, dgt->ystart, col },
 			{ interPos - (speed * 0.5f * i) + camera->GetRight() * size - camera->GetUp() * size, dgt->xend ,  dgt->ystart, col },
 			{ interPos - (speed * 0.5f * i) + camera->GetRight() * size + camera->GetUp() * size, dgt->xend ,  dgt->yend  , col },
@@ -149,7 +154,16 @@ void CFireBallProjectile::TickSparks()
 		i++;
 	}
 
-	explGenHandler.GenExplosion(cegID, pos, speed, ttl, (numSparks > 0)? sparks[0].size: 0.0f, 0.0f, owner(), nullptr);
+	explGenHandler.GenExplosion(
+		cegID,
+		pos,
+		speed,
+		ttl,
+		(numSparks > 0)? sparks[0].size: 0.0f,
+		0.0f,
+		owner(),
+		ExplosionHitObject()
+	);
 }
 
 

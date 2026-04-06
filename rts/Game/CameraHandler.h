@@ -125,7 +125,7 @@ public:
 	/**
 	 * @brief restore a camera state
 	 * @param sm the state to set
-	 * @return false when vector has wrong size or garbage data, true when aplied without errors
+	 * @return false when vector has wrong size or garbage data, true when applied without errors
 	 */
 	bool SetState(const CCameraController::StateMap& sm);
 
@@ -142,6 +142,9 @@ private:
 	bool LoadViewData(const ViewData& vd);
 
 private:
+	float3 lastCamRot;
+	float3 lastCamPos;
+
 	unsigned int currCamCtrlNum = CAMERA_MODE_DUMMY;
 	unsigned int currCamTransitionNum = CAMERA_TRANSITION_MODE_EXP_DECAY;
 

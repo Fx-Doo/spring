@@ -181,7 +181,7 @@ void CMouseHandler::ReloadCursors()
 	AssignMouseCursor("DeathWait",    "cursorwait",       mCenter,  false); // backup
 
 	AssignMouseCursor("ManualFire",   "cursormanfire",    mCenter,  false);
-	AssignMouseCursor("ManualFire",   "cursordgun",       mCenter,  false); // backup (backward compability)
+	AssignMouseCursor("ManualFire",   "cursordgun",       mCenter,  false); // backup (backward compatibility)
 	AssignMouseCursor("ManualFire",   "cursorattack",     mCenter,  false); // backup
 
 	AssignMouseCursor("Fight",        "cursorfight",      mCenter,  false);
@@ -342,22 +342,8 @@ void CMouseHandler::MousePress(int x, int y, int button)
 		return;
 	}
 
-	// limited receivers for MMB
-	if (button == SDL_BUTTON_MIDDLE) {
-		if (!locked) {
-			if (luaInputReceiver->MousePress(x, y, button)) {
-				activeReceiver = luaInputReceiver;
-				return;
-			}
-			if ((minimap != nullptr) && minimap->FullProxy()) {
-				if (minimap->MousePress(x, y, button)) {
-					activeReceiver = minimap;
-					return;
-				}
-			}
-		}
+	if (button == SDL_BUTTON_MIDDLE && locked)
 		return;
-	}
 
 	if (luaInputReceiver->MousePress(x, y, button)) {
 		if (activeReceiver == nullptr)
@@ -371,10 +357,20 @@ void CMouseHandler::MousePress(int x, int y, int button)
 				if (activeReceiver == nullptr)
 					activeReceiver = recv;
 
-				break;
+				return;
 			}
 		}
 
+	}
+
+	auto activeControllerReceiver = (activeController == nullptr) ? nullptr : activeController->GetInputReceiver();
+	if (button >= ACTION_BUTTON_MIN && activeControllerReceiver && activeControllerReceiver->MousePress(x, y, button)) {
+		activeReceiver = activeControllerReceiver;
+		return;
+	}
+
+	if (game != nullptr && !game->hideInterface) {
+		// skip guihandler in this case
 		return;
 	}
 
@@ -513,6 +509,10 @@ void CMouseHandler::MouseRelease(int x, int y, int button)
 		if (!buttons[SDL_BUTTON_LEFT].pressed && !buttons[SDL_BUTTON_MIDDLE].pressed && !buttons[SDL_BUTTON_RIGHT].pressed)
 			activeReceiver = nullptr;
 
+		return;
+	}
+
+	if (button >= ACTION_BUTTON_MIN && activeController != nullptr && activeController->MouseRelease(x, y, button)) {
 		return;
 	}
 
@@ -801,7 +801,7 @@ void CMouseHandler::HideMouse()
 	// signal that we are only interested in relative motion events when MMB-scrolling
 	// this way the mouse position will never change so it is also unnecessary to call
 	// SDL_WarpMouseInWindow and handle the associated wart of filtering motion events
-	// technically supercedes SDL_ShowCursor as well
+	// technically supersedes SDL_ShowCursor as well
 	SDL_SetRelativeMouseMode(SDL_TRUE);
 
 	const int2 viewMouseCenter = GetViewMouseCenter();

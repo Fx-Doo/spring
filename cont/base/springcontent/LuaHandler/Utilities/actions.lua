@@ -225,7 +225,7 @@ end
 local function TextAction(line, _)
 	assert(_ == nil, "actionHandler:Foobar() is deprecated, use actionHandler.Foobar()!")
 
-	local words = MakeWords(line)
+	local words = splitBySpace(line)
 	local cmd = words[1]
 	if not cmd then
 		return false

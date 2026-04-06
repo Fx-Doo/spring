@@ -6,6 +6,7 @@
 #include <string>
 #include <memory>
 
+#include "System/Rectangle.h"
 #include "Rendering/Textures/Bitmap.h"
 #include "Rendering/Textures/IAtlasAllocator.h"
 #include "Rendering/Textures/RowAtlasAlloc.h"
@@ -97,7 +98,7 @@ struct GlyphInfo {
 class CglFontRenderer;
 
 /**
-This class just store glyphs and load new glyphs if requred
+This class just store glyphs and load new glyphs if required
 It works with image and don't care about rendering these glyphs
 It works only and only with UTF32 chars
 **/
@@ -114,7 +115,9 @@ public:
 	static void Update();
 	static bool AddFallbackFont(const std::string& fontfile);
 	static void ClearFallbackFonts();
-	static void ClearAllGlyphs();
+	static bool ClearAllGlyphs();
+
+	static void PinFont(std::shared_ptr<FontFace>& face, const std::string& filename, const int size);
 
 	inline static spring::WrappedSyncRecursiveMutex sync = {};
 protected:
@@ -136,6 +139,7 @@ public:
 	const GlyphInfo& GetGlyph(char32_t ch); //< Get a glyph
 public:
 	void ReallocAtlases(bool pre);
+	bool HasColor() const { return needsColor; }
 protected:
 	void LoadWantedGlyphs(char32_t begin, char32_t end);
 	void LoadWantedGlyphs(const std::vector<char32_t>& wanted);
@@ -147,6 +151,7 @@ protected:
 private:
 	void ClearAtlases(const int width, const int height);
 	void CreateTexture(const int width, const int height);
+	void CreateTexture(const int width, const int height, const bool init);
 	void LoadGlyph(std::shared_ptr<FontFace>& f, char32_t ch, unsigned index);
 	bool ClearGlyphs();
 	void PreloadGlyphs();
@@ -173,6 +178,8 @@ protected:
 	int texHeight;
 	int wantedTexWidth;
 	int wantedTexHeight;
+	bool needsColor;
+	bool isColor;
 
 	unsigned int glyphAtlasTextureID = 0;
 
@@ -185,6 +192,8 @@ private:
 	int lastTextureUpdate = 0;
 	bool needsTextureUpload = true;
 	inline static int maxFontTries = 0;
+	inline static int maxPinnedFonts = 0;
+	inline static int allowColorFonts = 0;
 #endif
 	std::shared_ptr<FontFace> shFace;
 
@@ -193,8 +202,10 @@ private:
 	spring::unordered_map<uint64_t, float> kerningDynamic; // contains unicode kerning
 
 	std::vector<CBitmap> atlasGlyphs;
+	std::vector<SRectangle> blurRectangles;
 
 	CRowAtlasAlloc atlasAlloc;
+	spring::unordered_map<std::string, size_t> glyphNameToIdx;
 
 	CBitmap atlasUpdate;
 	CBitmap atlasUpdateShadow;

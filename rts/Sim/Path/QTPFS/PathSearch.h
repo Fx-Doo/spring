@@ -153,6 +153,7 @@ namespace QTPFS {
 
 		void ResetState(SearchNode* node, struct DirectionalSearchData& searchData, const float3& srcPoint);
 		void UpdateNode(SearchNode* nextNode, SearchNode* prevNode, unsigned int netPointIdx);
+		void LocalUpdateNode(SearchNode* nextNode, SearchNode* prevNode, float gCost, float hCost, const float2& netPoint);
 
 		void InitSearchNodeData(QTPFS::SearchNode *curSearchNode, QTPFS::INode *curNode) const {
 			curSearchNode->xmin = curNode->xmin();
@@ -182,7 +183,7 @@ namespace QTPFS {
 		bool ExecutePathSearch();
 		bool ExecuteRawSearch();
 
-		void SetForwardSearchLimit();
+		void SetNodeSearchLimit();
 
 		void GetRectangleCollisionVolume(const SearchNode& snode, CollisionVolume& v, float3& rm) const;
 
@@ -202,7 +203,7 @@ namespace QTPFS {
 		PathHashType pathSearchHash;
 
 		// Similar to hash, but the target quad and source quad numbers may not relate to actual
-		// leaf nodes in the quad tree. They repesent the quad that would be there if the leaf node
+		// leaf nodes in the quad tree. They represent the quad that would be there if the leaf node
 		// was exactly the size of QTPFS_PARTIAL_SHARE_PATH_MAX_SIZE. This allows searches that
 		// start and/or end in different, but close, quads. This is used to handle partially-
 		// shared path searches.
@@ -237,7 +238,7 @@ namespace QTPFS {
 		int fwdStepIndex = 0;
 		int bwdStepIndex = 0;
 
-		int fwdNodeSearchLimit = 0;
+		int nodeSearchLimit = 0;
 
 		size_t fwdNodesSearched = 0;
 		size_t bwdNodesSearched = 0;
@@ -245,7 +246,6 @@ namespace QTPFS {
 		bool haveFullPath;
 		bool havePartPath;
 		bool badGoal;
-		bool disallowNodeRevisit = false;
 
 public:
 		bool rawPathCheck = false;
@@ -269,6 +269,35 @@ public:
 
 		static float MAP_RELATIVE_MAX_NODES_SEARCHED;
 		static int MAP_MAX_NODES_SEARCHED;
+	};
+
+	// Because AI can request path searches at any time, we need to separate out unsynced path searches from synced
+	// searches. Even though unsynced searches are carried out immediately, they could be inserted and removed at
+	// different times relative to the insertion of synced searches, which means when the unsynced search is removed,
+	// it can cause the synced searches to be reordered. This matters because some searches are waiting on results from
+	// others in order to reuse results. If the order of the searches are changed, then on one machine a specific
+	// search could resolve on frame x and on another machine frame x + 1.
+	struct UnsyncedPathSearch : public PathSearch {
+		UnsyncedPathSearch() {
+			synced = false; // Mark this path as unsynced explicitly
+		}
+		UnsyncedPathSearch(unsigned int pathSearchType)
+			: PathSearch(pathSearchType)
+			{ synced = false; }
+	};
+
+	// Because some paths are managed externally to QTPFS (e.g. Lua paths), we need to be able to mark
+	// their searches as synced, but not have QTPFS manage their life-cycle (i.e. deletion after use).
+	// These paths are also not safe to have their data modified during path rebuilding after map changes because
+	// the rebuilding is order-sensitive and externally-managed paths could be destroyed at any time, which can
+	// change the order of path processing.
+	struct ExternallyManagedPathSearch : public PathSearch {
+		ExternallyManagedPathSearch() {
+			synced = true; // Mark this path as synced explicitly
+		}
+		ExternallyManagedPathSearch(unsigned int pathSearchType)
+			: PathSearch(pathSearchType)
+			{ synced = true; }
 	};
 }
 

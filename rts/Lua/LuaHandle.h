@@ -10,6 +10,7 @@
 #include "LuaHashString.h"
 #include "lib/lua/include/LuaInclude.h" //FIXME needed for GetLuaContextData
 
+
 #include <map>
 #include <string>
 #include <tuple>
@@ -25,6 +26,7 @@
 #define LUA_HANDLE_ORDER_INTRO           3000
 #define LUA_HANDLE_ORDER_MENU            4000
 
+#define MAX_LUA_COB_ARGS 10
 
 class CUnit;
 class CWeapon;
@@ -42,6 +44,9 @@ class LuaTextures;
 class LuaShaders;
 class CLuaDisplayLists;
 class CLuaRules;
+class CLuaUI;
+struct WeaponDef;
+class CCobDeferredCallin;
 
 
 class CLuaHandle : public CEventClient
@@ -70,8 +75,6 @@ class CLuaHandle : public CEventClient
 		static bool GetHandleSynced(const lua_State* L) { return GetLuaContextData(L)->synced; }
 
 		bool GetUserMode() const { return userMode; }
-
-		static int GetHandleAllowChanges(const lua_State* L) { return GetLuaContextData(L)->allowChanges; }
 
 		static CLuaHandle* GetHandle(lua_State* L) { return (GetLuaContextData(L)->owner); }
 
@@ -186,7 +189,8 @@ class CLuaHandle : public CEventClient
 		void ProjectileCreated(const CProjectile* p) override;
 		void ProjectileDestroyed(const CProjectile* p) override;
 
-		bool Explosion(int weaponID, int projectileID, const float3& pos, const CUnit* owner) override;
+		bool IsExplosionVisible(const WeaponDef* weaponDef, const CExplosionParams& params);
+		bool Explosion(int weaponID, const WeaponDef* weaponDef, const CExplosionParams& params) override;
 
 		void StockpileChanged(const CUnit* owner,
 		                      const CWeapon* weapon, int oldCount) override;
@@ -211,6 +215,12 @@ class CLuaHandle : public CEventClient
 		bool DefaultCommand(const CUnit* unit, const CFeature* feature, int& cmd) override;
 
 		void ActiveCommandChanged(const SCommandDescription* cmdDesc) override;
+		void CameraRotationChanged(const float3& rot) override;
+		void CameraPositionChanged(const float3& pos) override;
+
+		void MiniMapRotationChanged(const float newRot, const float oldRot) override;
+		void MiniMapStateChanged(const bool isMinimized, const bool isMaximized, const bool isSlaved) override;
+		void MiniMapGeometryChanged(const int2 newPos, const int2 newDim, const int2 oldPos, const int2 oldDim) override;
 
 		bool CommandNotify(const Command& cmd) override;
 
@@ -292,9 +302,19 @@ class CLuaHandle : public CEventClient
 		bool GotChatMsg(const std::string& msg, int playerID);
 		bool RecvLuaMsg(const std::string& msg, int playerID);
 
-	public: // custom call-in  (inter-script calls)
+	public:
+		// custom call-in  (inter-script calls)
 		bool HasXCall(const std::string& funcName) const { return HasCallIn(L, funcName); }
 		int XCall(lua_State* srcState, const char* funcName);
+
+		// cob callins
+		void Cob2Lua(const LuaHashString& funcName, const CUnit* unit,
+			     int& argsCount, int args[MAX_LUA_COB_ARGS]);
+
+		void Cob2LuaBatch(const LuaHashString& name, std::vector<CCobDeferredCallin>& callins);
+
+	private:
+		static const int* currentCobArgs;
 
 	protected:
 		CLuaHandle(const std::string& name, int order, bool userMode, bool synced);
@@ -305,6 +325,7 @@ class CLuaHandle : public CEventClient
 		static void PushTracebackFuncToRegistry(lua_State* L);
 
 		bool AddBasicCalls(lua_State* L);
+		bool AddCommonModules(lua_State* L);
 		bool LoadCode(lua_State* L, std::string code, const std::string& debug);
 		static bool AddEntriesToTable(lua_State* L, const char* name, bool (*entriesFunc)(lua_State*));
 
@@ -324,6 +345,8 @@ class CLuaHandle : public CEventClient
 
 		void DrawObjectsLua(std::initializer_list<bool> bools, const char* func);
 		void InitializeRmlUi();
+
+		int UnpackCobArg(lua_State* L);
 	protected:
 		bool rmlui = false;
 		bool userMode = false;
@@ -339,6 +362,9 @@ class CLuaHandle : public CEventClient
 
 		std::map <int, std::vector <std::pair <int, std::vector <int>>>> delayedCallsByFrame;
 		void RunDelayedFunctions(int frameNum);
+
+		virtual void EnactDevMode() const {};
+		void SwapEnableModule(lua_State* L, bool enabled, const char* moduleName, lua_CFunction func) const;
 
 		std::vector<bool> watchUnitDefs;        // callin masks for Unit*Collision, UnitMoveFailed
 		std::vector<bool> watchFeatureDefs;     // callin masks for UnitFeatureCollision
@@ -363,6 +389,9 @@ class CLuaHandle : public CEventClient
 		static int CallOutIsEngineMinVersion(lua_State* L);
 		static int CallOutDelayByFrames(lua_State* L);
 
+	protected:
+		static int LoadStringData(lua_State* L);
+
 	public: // static
 #if (!defined(UNITSYNC) && !defined(DEDICATED))
 		static inline LuaShaders& GetActiveShaders(lua_State* L) { return GetLuaContextData(L)->shaders; }
@@ -374,8 +403,7 @@ class CLuaHandle : public CEventClient
 		static inline LuaVAOs& GetActiveVAOs(lua_State* L) { return GetLuaContextData(L)->vaos; }
 		static inline CLuaDisplayLists& GetActiveDisplayLists(lua_State* L) { return GetLuaContextData(L)->displayLists; }
 #endif
-
-		static void SetDevMode(bool value) { devMode = value; }
+		static void SetDevMode(bool value);
 		static bool GetDevMode() { return devMode; }
 
 		static void HandleLuaMsg(int playerID, int script, int mode, const std::vector<std::uint8_t>& msg);
@@ -388,6 +416,7 @@ class CLuaHandle : public CEventClient
 
 		// FIXME needs access to L & RunCallIn
 		friend class CLuaRules;
+		friend class CLuaUI;
 
 		friend class CLuaStateCollector;
 };

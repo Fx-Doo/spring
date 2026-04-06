@@ -59,8 +59,14 @@ UnitDefWeapon::UnitDefWeapon(const WeaponDef* weaponDef, const LuaTable& weaponT
 	// allow weapon to swap muzzles every frame and accurately determine friendly fire, without waiting for slow update.
 	fastQueryPointUpdate = weaponTable.GetBool("fastQueryPointUpdate", fastQueryPointUpdate);
 
-	// Determines how to handle burst fire, when target is out of arc. 0 = no restrictions (deafult), 1 = don't fire, 2 = fire in current direction of weapon 
+	// Determines how to handle burst fire, when target is out of arc. 0 = no restrictions (default), 1 = don't fire, 2 = fire in current direction of weapon 
 	burstControlWhenOutOfArc = weaponTable.GetInt("burstControlWhenOutOfArc", burstControlWhenOutOfArc);
+
+	// Perform more math to accurately lead moving targets. 
+	// 0 = undershoot approaching or retreating targets (default)
+	// 1 = exact solution for non-parabolic shots and 1 accuracy iteration for parabolic shots
+	// 2+ = extra iterations for parabolic shots. Iterations terminate early once 1-frame accuracy is achieved. 
+	accurateLeading = weaponTable.GetInt("accurateLeading", accurateLeading);
 }
 
 
@@ -73,7 +79,7 @@ UnitDef::UnitDef()
 	, decoyDef(nullptr)
 	, upkeep(0.0f)
 	, resourceMake(0.0f)
-	, makesMetal(0.0f)
+	, makesResources(0.0f)
 	, buildTime(0.0f)
 	, buildeeBuildRadius(-1.f)
 	, extractsMetal(0.0f)
@@ -106,6 +112,7 @@ UnitDef::UnitDef()
 	, seismicSignature(0.0f)
 	, stealth(false)
 	, sonarStealth(false)
+	, leavesGhost(false)
 	, buildRange3D(false)
 	, buildDistance(16.0f) // 16.0f is the minimum distance between two 1x1 units
 	, buildSpeed(0.0f)
@@ -296,8 +303,15 @@ UnitDef::UnitDef(const LuaTable& udTable, const std::string& unitName, int id)
 	};
 
 	extractsMetal  = udTable.GetFloat("extractsMetal",  0.0f);
-	windGenerator  = udTable.GetFloat("windGenerator",  0.0f);
-	tidalGenerator = udTable.GetFloat("tidalGenerator", 0.0f);
+
+	windGenerator =
+		{ 0.0f
+		, udTable.GetFloat("windGenerator", 0.0f)
+	};
+	tidalGenerator =
+		{ 0.0f
+		, udTable.GetFloat("tidalGenerator", 0.0f)
+	};
 
 	upkeep =
 		{ udTable.GetFloat( "metalUpkeep", udTable.GetFloat( "metalUse", 0.0f))
@@ -307,7 +321,10 @@ UnitDef::UnitDef(const LuaTable& udTable, const std::string& unitName, int id)
 		{ udTable.GetFloat( "metalMake", 0.0f)
 		, udTable.GetFloat("energyMake", 0.0f)
 	};
-	makesMetal   = udTable.GetFloat("makesMetal", 0.0f);
+	makesResources =
+		{ udTable.GetFloat("makesMetal", 0.0f)
+		, 0.0f
+	};
 
 	autoHeal     = udTable.GetFloat("autoHeal",      0.0f) * (UNIT_SLOWUPDATE_RATE * INV_GAME_SPEED);
 	idleAutoHeal = udTable.GetFloat("idleAutoHeal", 10.0f) * (UNIT_SLOWUPDATE_RATE * INV_GAME_SPEED);
@@ -557,7 +574,7 @@ UnitDef::UnitDef(const LuaTable& udTable, const std::string& unitName, int id)
 	category = CCategoryHandler::Instance()->GetCategories(udTable.GetString("category", ""));
 	noChaseCategory = CCategoryHandler::Instance()->GetCategories(udTable.GetString("noChaseCategory", ""));
 
-	iconType = icon::iconHandler.GetIcon(udTable.GetString("iconType", "default"));
+	iconName = udTable.GetString("iconType", "default");
 
 	shieldWeaponDef    = nullptr;
 	stockpileWeaponDef = nullptr;
@@ -658,6 +675,8 @@ UnitDef::UnitDef(const LuaTable& udTable, const std::string& unitName, int id)
 	buildingMask = (std::uint16_t)udTable.GetInt("buildingMask", 1); //1st bit set to 1 constitutes for "normal building"
 	if (IsImmobileUnit())
 		CreateYardMap(udTable.GetString("yardMap", ""));
+
+	leavesGhost   = udTable.GetBool("leavesGhost", IsBuildingUnit());
 
 	decalDef.Parse(udTable);
 

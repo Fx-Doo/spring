@@ -219,10 +219,13 @@ void CFactory::UpdateBuild(CUnit* buildee) {
 	const int buildPiece = script->QueryBuildInfo();
 
 	const float3& buildPos = CalcBuildPos(buildPiece);
-	const CMatrix44f& buildPieceMat = script->GetPieceMatrix(buildPiece);
+	const auto& buildPieceMat = script->GetPieceMatrix(buildPiece);
 
-	// see CMatrix44f::CMatrix44f(const float3 pos, const float3 x, const float3 y, const float3 z)
-	// frontdir.x, frontdir.z
+	// note the code here works correctly with dae only because of rounding error
+	// in buildPieceMat[8], buildPieceMat[10] vs script->GetPieceMatrix(buildPiece) vs
+	//  const auto& buildPieceTra = script->GetPieceTransform(buildPiece);
+	//  const float3 xzVec = buildPieceTra.r * FwdVector;
+	// TODO: figure out a proper way
 	const int buildPieceHeading = GetHeadingFromVector(buildPieceMat[8], buildPieceMat[10]);
 	const int buildFaceHeading = GetHeadingFromFacing(buildFacing);
 
@@ -312,7 +315,7 @@ void CFactory::StopBuild()
 
 	if (curBuild) {
 		if (curBuild->beingBuilt) {
-			AddMetal(curBuild->cost.metal * curBuild->buildProgress, false);
+			AddResources({curBuild->cost.metal * curBuild->buildProgress, 0.0f}, false);
 			curBuild->KillUnit(nullptr, false, true, -CSolidObject::DAMAGE_FACTORY_CANCEL);
 		}
 		DeleteDeathDependence(curBuild, DEPENDENCE_BUILD);
@@ -320,6 +323,14 @@ void CFactory::StopBuild()
 
 	curBuild = nullptr;
 	curBuildDef = nullptr;
+}
+
+bool CFactory::IsCurrentBuildeeMatchingBuildQueueFront(const CCommandQueue& buildQueue) const
+{
+	if (curBuild == nullptr || buildQueue.empty())
+		return false;
+
+	return curBuild->unitDef->id == -buildQueue.front().GetID();
 }
 
 void CFactory::DependentDied(CObject* o)
@@ -446,7 +457,7 @@ void CFactory::AssignBuildeeOrders(CUnit* unit) {
 
 	if (!unit->unitDef->canfly && modInfo.insertBuiltUnitMoveCommand) {
 		// HACK: when a factory has a rallypoint set far enough away
-		// to trigger the non-admissable path estimators, we want to
+		// to trigger the non-admissible path estimators, we want to
 		// avoid units getting stuck inside by issuing them an extra
 		// move-order. However, this order can *itself* cause the PF
 		// system to consider the path blocked if the extra waypoint

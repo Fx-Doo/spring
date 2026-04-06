@@ -37,7 +37,7 @@ endif()
 ### give error when not found
 find_package_static(DevIL REQUIRED)
 
-### Assemble common incude dirs
+### Assemble common include dirs
 include_directories(BEFORE lib)
 include_directories(BEFORE lib/lua/include)
 include_directories(${CMAKE_SOURCE_DIR}/include/AL)
@@ -46,8 +46,8 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/lib/cereal/include)
 
 
-### libcpuid
-list(APPEND engineCommonLibraries "cpuid")
+#nowide for Windows utf-8 abstraction layer
+list(APPEND engineCommonLibraries "nowide::nowide")
 
 ### base64 from pr-downloader
 list(APPEND engineCommonLibraries "prd::base64")
@@ -65,13 +65,12 @@ endif (NO_SOUND)
 if    (UNIX AND NOT MINGW)
 	if    (PREFER_STATIC_LIBS)
 		prefer_static_libs()
-		find_library(C_LIBRARY c)
 		find_library(MATH_LIBRARY m)
 		#FIND_LIBRARY(PTHREAD_LIBRARY pthread)
 		#FIND_LIBRARY(OMP_LIBRARY gomp) FIXME it's hidden in some subfolders
 		unprefer_static_libs()
 
-		list(APPEND engineCommonLibraries ${C_LIBRARY} ${MATH_LIBRARY})
+		list(APPEND engineCommonLibraries ${MATH_LIBRARY})
 		#list(APPEND engineCommonLibraries ${PTHREAD_LIBRARY} ${OMP_LIBRARY})
 	endif (PREFER_STATIC_LIBS)
 
@@ -87,7 +86,7 @@ endif (UNIX AND NOT MINGW)
 find_package_static(ZLIB 1.2.7 REQUIRED)
 list(APPEND engineCommonLibraries DevIL::IL)
 list(APPEND engineCommonLibraries 7zip prd::jsoncpp ${SPRING_MINIZIP_LIBRARY} ZLIB::ZLIB Tracy::TracyClient)
-list(APPEND engineCommonLibraries lua luasocket archives assimp
+list(APPEND engineCommonLibraries lua luasocket archives assimp simdjson::simdjson fastgltf
 	gflags_nothreads_static)
 if(CMAKE_SYSTEM_NAME MATCHES "OpenBSD")
 	list(APPEND engineCommonLibraries execinfo)
@@ -100,19 +99,11 @@ if (WIN32)
 	list(APPEND engineCommonLibraries ${WIN32_LIBRARIES})
 endif (WIN32)
 
-if(${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD" OR ${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD")
-	#tcmalloc on freebsd is broken, default disable it (#4754)
-	set(USE_TCMALLOC_DEFAULT FALSE)
-else()
-	set(USE_TCMALLOC_DEFAULT TRUE)
-endif()
-
-find_package_static(TCMalloc)
-option(USE_TCMALLOC "use tcmalloc (part of google's perftools)" ${USE_TCMALLOC_DEFAULT})
-if    (USE_TCMALLOC AND TCMALLOC_LIBRARY)
-	message(STATUS "Using tcmalloc")
-	list(APPEND engineCommonLibraries ${TCMALLOC_LIBRARY})
-endif (USE_TCMALLOC AND TCMALLOC_LIBRARY)
+if    (USE_MIMALLOC)
+    message(STATUS "Using mimalloc")
+    list(APPEND engineCommonLibraries mimalloc-static)
+    add_compile_definitions(USE_MIMALLOC)
+endif (USE_MIMALLOC)
 
 
 if(UNIX AND NOT (CMAKE_SYSTEM_NAME MATCHES "OpenBSD"))
@@ -139,7 +130,6 @@ add_subdirectory(Sim)
 #add_subdirectory(System) # this is already added in ../
 
 make_global_var(engineSources
-		${sources_engine_Game}
 		${sources_engine_Net}
 		${sources_engine_Lua}
 		${sources_engine_Map}
@@ -152,6 +142,8 @@ make_global_var(engineSources
 		${sources_engine_ExternalAI}
 	)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/lib/assimp/include) #FIXME: hack for rts/Rendering/Models/IModelParser.cpp
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/lib/simdjson/include)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/lib/fastgltf/include)
 
 ### Add headers for generated project files (e.g. Code::Blocks)
 file(GLOB_RECURSE engineHeaders "*.h" "*.hpp" "*.inl")

@@ -46,6 +46,10 @@ DECL_FREE_HANDLER(CLuaIntro, luaIntro)
 
 /******************************************************************************/
 
+/***
+ * @class Intro : Callins
+ * @see Callins
+ */
 CLuaIntro::CLuaIntro()
 : CLuaHandle("LuaIntro", LUA_HANDLE_ORDER_INTRO, true, false)
 {
@@ -99,6 +103,7 @@ CLuaIntro::CLuaIntro()
 
 	// load the spring libraries
 	if (
+	    !AddCommonModules(L)						    ||
 	    !AddEntriesToTable(L, "Spring",    LoadUnsyncedCtrlFunctions)           ||
 	    !AddEntriesToTable(L, "Spring",    LoadUnsyncedReadFunctions)           ||
 	    !AddEntriesToTable(L, "Spring",    LoadSyncedReadFunctions  )           ||
@@ -328,7 +333,7 @@ string CLuaIntro::LoadFile(const string& filename) const
 /***
  * Draws custom load screens.
  *
- * @function DrawLoadScreen
+ * @function Intro:DrawLoadScreen
  */
 void CLuaIntro::DrawLoadScreen()
 {
@@ -353,7 +358,7 @@ void CLuaIntro::DrawLoadScreen()
 
 
 /***
- * @function LoadProgress
+ * @function Intro:LoadProgress
  * @param message string
  * @param replaceLastLine boolean 
  */

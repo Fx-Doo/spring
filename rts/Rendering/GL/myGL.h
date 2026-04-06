@@ -9,15 +9,7 @@
 
 #include <array>
 
-#if defined(HEADLESS)
-	#undef WINGDIAPI
-	#define WINGDIAPI //working around https://github.com/beyond-all-reason/spring/issues/27
-	#include "lib/headlessStubs/gladstub.h"
-	#undef WINGDIAPI
-#else
-	#include <glad/glad.h>
-#endif
-
+#include <glad/glad.h>
 
 #include "System/float3.h"
 #include "System/float4.h"
@@ -25,6 +17,7 @@
 #include "System/UnorderedMap.hpp"
 
 #include "glStateDebug.h"
+#include "glDebugGroup.hpp"
 
 #if       defined(HEADLESS)
 	// All OpenGL functions should always exists on HEADLESS.
@@ -35,12 +28,8 @@
 	#define IS_GL_FUNCTION_AVAILABLE(functionName) true
 #else
 	// Check if the functions address is non-NULL.
-	#define IS_GL_FUNCTION_AVAILABLE(functionName) (functionName != NULL)
+	#define IS_GL_FUNCTION_AVAILABLE(functionName) (functionName != nullptr)
 #endif // defined(HEADLESS)
-
-#ifndef GL_INVALID_INDEX
-	#define GL_INVALID_INDEX -1
-#endif
 
 struct TextureParameters {
 	GLint intFmt;
@@ -104,6 +93,7 @@ static constexpr  glFrustumFuncPtr  glFrustumFuncs[2] = {__spring_glFrustum_noCC
 
 void WorkaroundATIPointSizeBug();
 
+void glSaveTextureArray(const GLuint textureID, const char* filename, int level = 0, int page = 0);
 void glSaveTexture(const GLuint textureID, const char* filename, int level = 0);
 
 void RecoilGetTexParams(GLenum target, GLuint textureID, GLint level, TextureParameters& textureParameters);

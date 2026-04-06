@@ -11,10 +11,12 @@
 #include "Sim/Features/Feature.h"
 #include "Sim/Projectiles/Projectile.h"
 
+struct CExplosionParams;
 class CWeapon;
 struct Command;
 struct BuildInfo;
 class LuaMaterial;
+struct WeaponDef;
 
 class CEventHandler
 {
@@ -135,7 +137,7 @@ class CEventHandler
 		void ProjectileCreated(const CProjectile* proj, int allyTeam);
 		void ProjectileDestroyed(const CProjectile* proj, int allyTeam);
 
-		bool Explosion(int weaponDefID, int projectileID, const float3& pos, const CUnit* owner);
+		bool Explosion(int weaponDefID, const WeaponDef* weaponDef, const CExplosionParams& params);
 
 		void StockpileChanged(const CUnit* unit,
 		                      const CWeapon* weapon, int oldCount);
@@ -235,6 +237,11 @@ class CEventHandler
 		void DefaultCommand(const CUnit* unit, const CFeature* feature, int& cmd);
 
 		void ActiveCommandChanged(const SCommandDescription *cmdDesc);
+		void CameraRotationChanged(const float3& rot);
+		void CameraPositionChanged(const float3& pos);
+		void MiniMapRotationChanged(const float newRot, const float oldRot);
+		void MiniMapStateChanged(const bool isMinimized, const bool isMaximized, const bool isSlaved);
+		void MiniMapGeometryChanged(const int2 newPos, const int2 newDim, const int2 oldPos, const int2 oldDim);
 		bool CommandNotify(const Command& cmd);
 
 		bool AddConsoleLine(const std::string& msg, const std::string& section, int level);
@@ -700,7 +707,7 @@ inline void CEventHandler::UnsyncedHeightMapUpdate(const SRectangle& rect)
 
 
 
-inline bool CEventHandler::Explosion(int weaponDefID, int projectileID, const float3& pos, const CUnit* owner)
+inline bool CEventHandler::Explosion(int weaponDefID, const WeaponDef* weaponDef, const CExplosionParams& params)
 {
 	auto& clients = listExplosion;
 
@@ -710,7 +717,7 @@ inline bool CEventHandler::Explosion(int weaponDefID, int projectileID, const fl
 		// discard return-value from clients lacking full-read access
 		// (redundant for synced gadgets; watchWeaponDefs is checked)
 		// NOTE: the call-in may remove itself from the client list
-		if (!ec->Explosion(weaponDefID, projectileID, pos, owner) || !ec->GetFullRead()) {
+		if (!ec->Explosion(weaponDefID, weaponDef, params) || !ec->GetFullRead()) {
 			i += (i < clients.size() && ec == clients[i]);
 			continue;
 		}

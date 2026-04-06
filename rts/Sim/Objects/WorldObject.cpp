@@ -1,7 +1,7 @@
 /* This file is part of the Spring engine (GPL v2 or later), see LICENSE.html */
 
 #include "WorldObject.h"
-#include "Rendering/Models/3DModel.h"
+#include "Rendering/Models/3DModel.hpp"
 #include "System/Threading/ThreadPool.h"
 
 #include "System/Misc/TracyDefs.h"
@@ -13,11 +13,13 @@ CR_REG_METADATA(CWorldObject, (
 	CR_MEMBER(tempNum),
 	CR_MEMBER(mtTempNum),
 	CR_MEMBER(radius),
+	CR_MEMBER(buildeeRadius),
 	CR_MEMBER(height),
 	CR_MEMBER(sqRadius),
 	CR_MEMBER(drawRadius),
 	CR_MEMBER(drawFlag),
 	CR_MEMBER(previousDrawFlag),
+	CR_MEMBER(preFrameTra),
 	// the projectile system needs to know that 'pos' and 'speed' are accessible by script
 	CR_MEMBER_BEGINFLAG(CM_Config),
 		CR_MEMBER(pos),

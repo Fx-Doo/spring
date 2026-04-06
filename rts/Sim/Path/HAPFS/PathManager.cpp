@@ -311,7 +311,7 @@ IPath::SearchResult CPathManager::ArrangePath(
 
 	unsigned int bestSearch = -1u; // index
 
-	pfDef->useVerifiedStartBlock = true; // ((caller != nullptr) && ThreadPool::inMultiThreadedSection);
+	pfDef->useVerifiedStartBlock = true; // ((caller != nullptr) && ThreadPool::IsInMultiThreadedSection());
 
 	{
 		RECOIL_DETAILED_TRACY_ZONE;
@@ -434,15 +434,16 @@ unsigned int CPathManager::RequestPath(
 	float3 startPos,
 	float3 goalPos,
 	float goalRadius,
-	bool synced
+	bool synced,
+	bool immediateResult
 ) {
 	unsigned int pathId = 0;
 
 	if (!IsFinalized())
 		return 0;
 
-	if (synced) {
-		assert(!ThreadPool::inMultiThreadedSection);
+	if (synced && !immediateResult) {
+		assert(!ThreadPool::IsInMultiThreadedSection());
 
 		PathSearch* existingSearch = nullptr;
 		auto searchView = registry.view<PathSearch>();
@@ -638,7 +639,7 @@ float3 CPathManager::NextWayPoint(
 	// recursive refinement of its lower-resolution segments
 	// if so, check if the med-res path also needs extending
 	if (extendMaxResPath && (!synced)) {
-		assert(!ThreadPool::inMultiThreadedSection);
+		assert(!ThreadPool::IsInMultiThreadedSection());
 		LowRes2MaxRes(*multiPath, callerPos, owner, synced);
 		FinalizePath(multiPath, callerPos, multiPath->finalGoal, multiPath->searchResult == IPath::CantGetCloser);
 	}
@@ -671,7 +672,7 @@ float3 CPathManager::NextWayPoint(
 					break;
 				}
 				// direct to the nearest lower-res waypoint as a fallback until the path can be expanded.
-				// this creates the next step, so it will be checked very regulary until the path is
+				// this creates the next step, so it will be checked very regularly until the path is
 				// extended.
 				if (waypoint == noPathPoint) {
 					auto createTempWaypointFromLowerRes = [&createTempWaypoint, &callerPos, radius](IPath::Path& path) {

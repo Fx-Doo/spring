@@ -49,6 +49,7 @@ void CLuaUnitScriptNames::InitScriptNames()
 
 	scriptNames[LUAFN_MoveFinished] = "MoveFinished";
 	scriptNames[LUAFN_TurnFinished] = "TurnFinished";
+	scriptNames[LUAFN_ScaleFinished] = "ScaleFinished";
 
 	// Also add the weapon aiming stuff
 	scriptNames[LUAFN_QueryWeapon]   = "QueryWeapon";
@@ -65,7 +66,7 @@ void CLuaUnitScriptNames::InitScriptNames()
 	scriptMap.reserve(scriptNames.size());
 
 	for (size_t i = 0; i < scriptNames.size(); ++i) {
-		scriptMap.insert(scriptNames[i], i);
+		scriptMap.emplace(scriptNames[i], i);
 	}
 }
 

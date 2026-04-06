@@ -18,6 +18,7 @@
 
 class CUnit;
 class CFeature;
+class CWeapon;
 class CMatrix44f;
 struct AtlasedTexture;
 class CProjectileDrawer;
@@ -43,13 +44,17 @@ public:
 	virtual void Collision() { Delete(); }
 	virtual void Collision(CUnit* unit) { Collision(); }
 	virtual void Collision(CFeature* feature) { Collision(); }
+	virtual void Collision(CWeapon* weapon) { Collision(); }
 	//Not inheritable - used for removing a projectile from Lua.
 	void Delete();
+	virtual void PreUpdate();
 	virtual void Update();
 	virtual void Init(const CUnit* owner, const float3& offset) override;
 
 	virtual void Draw() {}
 	virtual void DrawOnMinimap() const;
+
+	bool UpdateAnimParams() override;
 
 	virtual int GetProjectilesCount() const = 0;
 
@@ -112,7 +117,9 @@ public:
 	bool castShadow = false;
 	bool drawSorted = true;
 
-	float3 dir;                    // set via Init()
+	bool blockPreciseCol = false;
+
+	float3 dir = FwdVector;        // set via Init()
 	float3 drawPos;
 
 	float myrange = 0.0f;          // used by WeaponProjectile::TraveledRange
@@ -135,16 +142,13 @@ protected:
 	uint32_t collisionFlags = 0;
 	uint32_t renderIndex = -1u;
 
-	static TypedRenderBuffer<VA_TYPE_C> mmLnsRB;
-	static TypedRenderBuffer<VA_TYPE_C> mmPtsRB;
-
 	static bool GetMemberInfo(SExpGenSpawnableMemberInfo& memberInfo);
 	static bool IsValidTexture(const AtlasedTexture* tex);
 public:
 	static void AddMiniMapVertices(VA_TYPE_C&& v1, VA_TYPE_C&& v2);
 
-	static TypedRenderBuffer<VA_TYPE_C>& GetMiniMapLinesRB() { return mmLnsRB; }
-	static TypedRenderBuffer<VA_TYPE_C>& GetMiniMapPointsRB() { return mmPtsRB; }
+	static TypedRenderBuffer<VA_TYPE_C>& GetMiniMapLinesRB();
+	static TypedRenderBuffer<VA_TYPE_C>& GetMiniMapPointsRB();
 
 	//static TypedRenderBuffer<VA_TYPE_C >& GetAnimationRenderBuffer();
 	std::vector<int> quads;

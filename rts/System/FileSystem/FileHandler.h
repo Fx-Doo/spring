@@ -5,8 +5,8 @@
 
 #include <vector>
 #include <string>
-#include <fstream>
 #include <cinttypes>
+#include <nowide/fstream.hpp>
 
 #include "VFSModes.h"
 
@@ -16,7 +16,7 @@
  * have a look at the FileSystem class.
  *
  * This class should be threadsafe (multiple threads can use multiple
- * CFileHandler pointing to the same file simulatneously) as long as there are
+ * CFileHandler pointing to the same file simultaneously) as long as there are
  * no new Archives added to the VFS (which should not happen after PreGame).
  */
 class CFileHandler
@@ -76,7 +76,7 @@ protected:
 	static bool InsertVFSDirs(std::vector<std::string>& dirSet, const std::string& path, const std::string& pattern, bool recursive, int section);
 
 	std::string fileName;
-	std::ifstream ifs;
+	nowide::ifstream ifs;
 	std::vector<std::uint8_t> fileBuffer;
 
 	int filePos = 0;

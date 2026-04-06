@@ -126,7 +126,7 @@ static void CreateBindingTypeMap()
 	bindingType[GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY] = INT1;
 	bindingType[GL_UNSIGNED_INT_SAMPLER_BUFFER]               = INT1;
 	bindingType[GL_UNSIGNED_INT_SAMPLER_2D_RECT]              = INT1;
-/*
+
 	bindingType[GL_IMAGE_1D]                   = INT1;
 	bindingType[GL_IMAGE_2D]                   = INT1;
 	bindingType[GL_IMAGE_3D]                   = INT1;
@@ -161,7 +161,6 @@ static void CreateBindingTypeMap()
 	bindingType[GL_UNSIGNED_INT_IMAGE_2D_MULTISAMPLE_ARRAY] = INT1;
 
 	bindingType[GL_UNSIGNED_INT_ATOMIC_COUNTER] = ATOMIC;
-*/
 }
 
 DO_ONCE(CreateBindingTypeMap)
@@ -328,7 +327,6 @@ static void CopyShaderState_UniformBlocks(GLuint newProgID, GLuint oldProgID)
 static void CopyShaderState_ShaderStorage(GLuint newProgID, GLuint oldProgID)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-#ifdef GL_ARB_program_interface_query
 	if (!GLAD_GL_ARB_program_interface_query)
 		return;
 
@@ -362,7 +360,6 @@ static void CopyShaderState_ShaderStorage(GLuint newProgID, GLuint oldProgID)
 			1, nullptr, &value);
 		glShaderStorageBlockBinding(newProgID, newLoc, value);
 	}
-#endif
 }
 
 
@@ -400,8 +397,7 @@ static void CopyShaderState_Attributes(GLuint newProgID, GLuint oldProgID)
 static void CopyShaderState_TransformFeedback(GLuint newProgID, GLuint oldProgID)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-#ifdef GL_ARB_transform_feedback3
-	//FIXME find out what extensions are really needed
+
 	if (!GLAD_GL_ARB_transform_feedback3)
 		return;
 
@@ -431,7 +427,6 @@ static void CopyShaderState_TransformFeedback(GLuint newProgID, GLuint oldProgID
 	}
 
 	glTransformFeedbackVaryings(newProgID, numVaryings, (const GLchar**)&varyingsPtr[0], bufferMode);
-#endif
 }
 
 
@@ -462,7 +457,6 @@ static bool CopyShaderState_ContainsGeometryShader(GLuint oldProgID)
 static void CopyShaderState_Geometry(GLuint newProgID, GLuint oldProgID)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-#if defined(GL_ARB_geometry_shader4) && defined(GL_ARB_get_program_binary)
 	if (!GLAD_GL_ARB_geometry_shader4)
 		return;
 	// "GL_INVALID_OPERATION is generated if pname is GL_GEOMETRY_VERTICES_OUT,
@@ -480,7 +474,6 @@ static void CopyShaderState_Geometry(GLuint newProgID, GLuint oldProgID)
 	if (inputType != 0)   glProgramParameteri(newProgID, GL_GEOMETRY_INPUT_TYPE, inputType);
 	if (outputType != 0)  glProgramParameteri(newProgID, GL_GEOMETRY_OUTPUT_TYPE, outputType);
 	if (verticesOut != 0) glProgramParameteri(newProgID, GL_GEOMETRY_VERTICES_OUT, verticesOut);
-#endif
 }
 #endif
 

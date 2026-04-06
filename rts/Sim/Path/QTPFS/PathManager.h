@@ -44,6 +44,7 @@ namespace QTPFS {
 		std::uint32_t GetPathCheckSum() const override { return pfsCheckSum; }
 
 		std::int64_t Finalize() override;
+		std::int64_t PostFinalizeRefresh() override;
 
 		bool PathUpdated(unsigned int pathID) override;
 		void ClearPathUpdated(unsigned int pathID) override;
@@ -54,7 +55,7 @@ namespace QTPFS {
 		void Update() override;
 		void UpdatePath(const CSolidObject* owner, unsigned int pathID) override;
 		void DeletePath(unsigned int pathID, bool force = false) override;
-		void DeletePathEntity(entt::entity pathEntity);
+		void DeletePathEntity(QTPFS::entity pathEntity);
 
 		unsigned int RequestPath(
 			CSolidObject* object,
@@ -62,7 +63,8 @@ namespace QTPFS {
 			float3 sourcePos,
 			float3 targetPos,
 			float radius,
-			bool synced
+			bool synced,
+			bool immediateResult = false
 		) override;
 
 		float3 NextWayPoint(
@@ -91,6 +93,9 @@ namespace QTPFS {
 
 		const spring::unordered_map<unsigned int, PathSearchTrace::Execution*>& GetPathTraces() const { return pathTraces; }
 
+		void RemovePathFromShared(QTPFS::entity entity);
+		void RemovePathFromPartialShared(QTPFS::entity entity);
+
 	private:
 		void MapChanged(int x1, int z1, int x2, int z2);
 
@@ -108,10 +113,10 @@ namespace QTPFS {
 		typedef spring::unordered_map<unsigned int, unsigned int>::iterator PathTypeMapIt;
 		typedef spring::unordered_map<unsigned int, PathSearchTrace::Execution*> PathTraceMap;
 		typedef spring::unordered_map<unsigned int, PathSearchTrace::Execution*>::iterator PathTraceMapIt;
-		typedef spring::unordered_map<PathHashType, entt::entity> SharedPathMap;
-		typedef spring::unordered_map<PathHashType, entt::entity>::iterator SharedPathMapIt;
-		typedef spring::unordered_map<PathHashType, entt::entity> PartialSharedPathMap;
-		typedef spring::unordered_map<PathHashType, entt::entity>::iterator PartialSharedPathMapIt;
+		typedef spring::unordered_map<PathHashType, QTPFS::entity> SharedPathMap;
+		typedef spring::unordered_map<PathHashType, QTPFS::entity>::iterator SharedPathMapIt;
+		typedef spring::unordered_map<PathHashType, QTPFS::entity> PartialSharedPathMap;
+		typedef spring::unordered_map<PathHashType, QTPFS::entity>::iterator PartialSharedPathMapIt;
 
 		typedef std::vector<PathSearch*> PathSearchVect;
 		typedef std::vector<PathSearch*>::iterator PathSearchVectIt;
@@ -121,12 +126,11 @@ namespace QTPFS {
 		void InitRootSize(const SRectangle& r);
 		void UpdateNodeLayer(unsigned int layerNum, const SRectangle& r, int currentThread);
 
-		bool InitializeSearch(entt::entity searchEntity);
-		void RemovePathFromShared(entt::entity entity);
-		void RemovePathFromPartialShared(entt::entity entity);
-		void RemovePathSearch(entt::entity pathEntity);
+		bool InitializeSearch(QTPFS::entity searchEntity);
+		void RemovePathSearch(QTPFS::entity pathEntity);
 
 		void ReadyQueuedSearches();
+		void ProcessPathSearch(int i, bool shouldBeRaw);
 		void ExecuteQueuedSearches();
 		void QueueDeadPathSearches();
 
@@ -137,6 +141,7 @@ namespace QTPFS {
 			const float3& targetPoint,
 			const float radius,
 			const bool synced,
+			const bool externalRequest,
 			const bool allowRawSearch
 		);
 
@@ -152,10 +157,11 @@ namespace QTPFS {
 		bool ExecuteSearch(
 			PathSearch* search,
 			NodeLayer& nodeLayer,
-			unsigned int pathType
+			unsigned int pathType,
+			bool immediateSearch
 		);
 
-		unsigned int ExecuteUnsyncedSearch(unsigned int pathId);
+		unsigned int ExecuteImmediateSearch(unsigned int pathId);
 
 		bool IsFinalized() const { return isFinalized; }
 
@@ -195,7 +201,7 @@ namespace QTPFS {
 
 		std::uint32_t pfsCheckSum;
 
-		entt::entity systemEntity = entt::null;
+		QTPFS::entity systemEntity = entt::null;
 
 		bool isFinalized = false;
 

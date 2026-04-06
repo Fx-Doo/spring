@@ -8,7 +8,9 @@
 #include "3DOParser.h"
 #include "S3OParser.h"
 #include "AssParser.h"
-#include "3DModelVAO.h"
+#include "GLTFParser.h"
+#include "3DModel.hpp"
+#include "3DModelVAO.hpp"
 #include "ModelsLock.h"
 #include "Game/GlobalUnsynced.h"
 #include "Rendering/Textures/S3OTextureHandler.h"
@@ -33,7 +35,7 @@ CModelLoader modelLoader;
 static C3DOParser g3DOParser;
 static CS3OParser gS3OParser;
 static CAssParser gAssParser;
-
+static CGLTFParser gGLTFParser;
 
 static bool CheckAssimpWhitelist(const char* aiExt) {
 	constexpr std::array<const char*, 5> whitelist = {
@@ -55,6 +57,8 @@ static void RegisterModelFormats(CModelLoader::ParsersType& parsers) {
 	// file-extension should be lowercase
 	parsers.emplace_back("3do", &g3DOParser);
 	parsers.emplace_back("s3o", &gS3OParser);
+	parsers.emplace_back("gltf", &gGLTFParser);
+	parsers.emplace_back("glb", &gGLTFParser);
 
 	std::string extension;
 	std::string extensions;
@@ -97,7 +101,7 @@ static void LoadDummyModel(S3DModel& model)
 	model.numPieces = 1;
 	// give it one empty piece
 	model.AddPiece(g3DOParser.AllocPiece());
-	model.FlattenPieceTree(model.GetRootPiece()); //useless except for setting up matAlloc
+	model.FlattenPieceTree(model.GetRootPiece()); //useless except for setting up traAlloc
 	model.GetRootPiece()->SetCollisionVolume(CollisionVolume('b', 'z', -UpVector, ZeroVector));
 	model.loadStatus = S3DModel::LoadStatus::LOADED;
 }
@@ -158,6 +162,7 @@ void CModelLoader::InitParsers() const
 	RECOIL_DETAILED_TRACY_ZONE;
 	g3DOParser.Init();
 	gS3OParser.Init();
+	gGLTFParser.Init();
 	gAssParser.Init();
 }
 
@@ -184,6 +189,7 @@ void CModelLoader::KillParsers() const
 	RECOIL_DETAILED_TRACY_ZONE;
 	g3DOParser.Kill();
 	gS3OParser.Kill();
+	gGLTFParser.Kill();
 	gAssParser.Kill();
 }
 
@@ -265,7 +271,7 @@ void CModelLoader::LogErrors()
 
 S3DModel* CModelLoader::LoadModel(std::string name, bool preload)
 {
-	RECOIL_DETAILED_TRACY_ZONE;
+	ZoneScoped;
 	// cannot happen except through SpawnProjectile
 	if (name.empty())
 		return nullptr;
@@ -389,19 +395,12 @@ void CModelLoader::DrainPreloadFutures(uint32_t numAllowed)
 IModelParser* CModelLoader::GetFormatParser(const std::string& pathExt)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	// cached record
-	static std::pair<std::string, IModelParser*> lastParser = {};
-
 	const std::string extension = StringToLower(pathExt);
-
-	if (lastParser.first == extension)
-		return lastParser.second;
 
 	const auto it = std::find_if(parsers.begin(), parsers.end(), [&extension](const auto& item) { return item.first == extension; });
 	if (it == parsers.end())
 		return nullptr;
 
-	lastParser = *it;
 	return it->second;
 }
 

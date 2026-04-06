@@ -8,7 +8,7 @@
 #include "System/FileSystem/SimpleParser.h"
 #include "Rendering/ShadowHandler.h"
 #include "Rendering/Units/UnitDrawer.h"
-#include "Rendering/Models/3DModel.h"
+#include "Rendering/Models/3DModel.hpp"
 #include "Rendering/Models/ModelsLock.h"
 #include "Rendering/Textures/Bitmap.h"
 #include "System/StringUtil.h"
@@ -173,7 +173,9 @@ unsigned int CS3OTextureHandler::LoadAndCacheTexture(
 	}
 
 	const unsigned int texID = preloadCall ? 0 : bitmap->CreateMipMapTexture();
+#ifndef HEADLESS
 	assert(preloadCall || texID > 0);
+#endif
 
 	if (textureIt != textureCache.end() && texID > 0) {
 		assert(!preloadCall);

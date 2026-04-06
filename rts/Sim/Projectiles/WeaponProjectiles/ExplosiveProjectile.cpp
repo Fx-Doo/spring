@@ -54,7 +54,16 @@ void CExplosiveProjectile::Update()
 		Collision();
 	} else {
 		if (ttl > 0)
-			explGenHandler.GenExplosion(cegID, pos, speed, ttl, damages->damageAreaOfEffect, 0.0f, owner(), nullptr);
+			explGenHandler.GenExplosion(
+				cegID,
+				pos,
+				speed,
+				ttl,
+				damages->damageAreaOfEffect,
+				0.0f,
+				owner(),
+				ExplosionHitObject()
+			);
 	}
 
 	curTime += invttl;
@@ -79,7 +88,7 @@ void CExplosiveProjectile::Draw()
 	if (!validTextures[0])
 		return;
 
-	UpdateWeaponAnimParams();
+	UpdateAnimParams();
 
 	uint8_t col[4] = {0};
 
@@ -118,7 +127,8 @@ void CExplosiveProjectile::Draw()
 		col[2] = stageDecay * col[2];
 		col[3] = stageDecay * col[3];
 
-		AddWeaponEffectsQuad<1>(
+		AddEffectsQuad<1>(
+			tex->pageNum,
 			{ stagePos - xdirCam - ydirCam, tex->xstart, tex->ystart, col },
 			{ stagePos + xdirCam - ydirCam, tex->xend,   tex->ystart, col },
 			{ stagePos + xdirCam + ydirCam, tex->xend,   tex->yend,   col },

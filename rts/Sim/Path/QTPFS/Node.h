@@ -5,15 +5,15 @@
 
 #include <array>
 #include <cinttypes>
-#include <fstream>
 #include <limits>
 #include <variant>
 #include <vector>
-
+#include <nowide/fstream.hpp>
 
 #include "PathEnums.h"
 #include "PathDefines.h"
 
+#include "System/CompactVector.h"
 #include "System/float3.h"
 #include "System/Rectangle.h"
 
@@ -35,6 +35,8 @@ namespace QTPFS {
 			int nodeId;
 			std::array<float2, QTPFS_MAX_NETPOINTS_PER_NODE_EDGE> netpoints;
 		};
+
+		typedef recoil::CompactVector<NeighbourPoints> NeighbourPointsType;
 
 		void SetNodeNumber(unsigned int n) { nodeNumber = n; }
 		unsigned int GetNodeNumber() const { return nodeNumber; }
@@ -83,7 +85,7 @@ namespace QTPFS {
 
 		void PreTesselate(NodeLayer& nl, const SRectangle& r, SRectangle& ur, unsigned int depth, const UpdateThreadData* threadData);
 		void Tesselate(NodeLayer& nl, const SRectangle& r, unsigned int depth, const UpdateThreadData* threadData);
-		void Serialize(std::fstream& fStream, NodeLayer& nodeLayer, unsigned int* streamSize, unsigned int depth, bool readMode);
+		void Serialize(nowide::fstream& fStream, NodeLayer& nodeLayer, unsigned int* streamSize, unsigned int depth, bool readMode);
 
 		bool IsLeaf() const { return (childBaseIndex == -1u); }
 		bool CanSplit(unsigned int depth, bool forced) const;
@@ -108,8 +110,8 @@ namespace QTPFS {
 
 		bool RectIsInside(const SRectangle& rect) const {
 			return
-				xmin() <= rect.x1 && zmin() <= rect.y1 &&
-				xmax() >= rect.x2 && zmax() >= rect.y2;
+				xmin() <= rect.x1 && zmin() <= rect.z1 &&
+				xmax() >= rect.x2 && zmax() >= rect.z2;
 		}
 
 		bool RectIntersects(const SRectangle& rect) const {
@@ -132,7 +134,7 @@ namespace QTPFS {
 		static unsigned int MinSizeX() { return MIN_SIZE_X; }
 		static unsigned int MinSizeZ() { return MIN_SIZE_Z; }
 
-		const std::vector<NeighbourPoints>& GetNeighbours() const {
+		const NeighbourPointsType& GetNeighbours() const {
 			return neighbours;
 		}
 
@@ -190,12 +192,13 @@ namespace QTPFS {
 		float moveCostAvg = -1.0f;
 
 		unsigned int childBaseIndex = -1u;
-		std::vector<NeighbourPoints> neighbours;
+
+		NeighbourPointsType neighbours;
 	};
 
 	struct NodeSearched {};
 
-	struct SearchNode {
+	struct alignas(64) SearchNode {
 
 		SearchNode() {}
 
@@ -290,6 +293,9 @@ namespace QTPFS {
 		unsigned int nodeNumber = -1;
 		bool badNode = false;
 	};
+
+	static_assert (sizeof(SearchNode) <= 64, "SearchNode should fit in a single cache line");
+	static_assert (std::is_trivially_destructible<SearchNode>::value, "SearchNode should be trivially destructible or else performance in SearchThreadData will degrade.");
 }
 
 #endif

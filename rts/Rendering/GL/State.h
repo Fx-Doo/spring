@@ -88,6 +88,10 @@ private:
 	ValueType value;
 };
 
+namespace myGL {
+	void PixelStoreUnpackAlignment(GLint alignment);
+}
+
 template<class AttributeT> struct UniqueStateAttributeValueType {
 public:
 	using AttributeType = AttributeT;
@@ -111,6 +115,9 @@ private:
 #define ATTRIBUTE(name) name##Attribute
 #define ATTRIBUTE_TYPE_DEFS(name, ...) \
 	using ATTRIBUTE(name) = StateAttribute<&(gl##name), __VA_ARGS__>; \
+	using name = UniqueStateAttributeValueType<ATTRIBUTE(name)>;
+#define CUSTOM_ATTRIBUTE_TYPE_DEFS(name, ...) \
+	using ATTRIBUTE(name) = StateAttribute<&(myGL::name), __VA_ARGS__>; \
 	using name = UniqueStateAttributeValueType<ATTRIBUTE(name)>;
 #define CAPABILITY_ATTRIBUTE_TYPE_DEFS(name, glParamName) \
 	using ATTRIBUTE(name) = StateAttribute<nullptr, glParamName>; \
@@ -165,6 +172,8 @@ namespace State {
 	CAPABILITY_ATTRIBUTE_TYPE_DEFS (PrimitiveRestart, GL_PRIMITIVE_RESTART);
 	ATTRIBUTE_TYPE_DEFS            (PrimitiveRestartIndex, GL_PRIMITIVE_RESTART_INDEX);
 
+	ATTRIBUTE_TYPE_DEFS            (MinSampleShading, GL_MIN_SAMPLE_SHADING_VALUE);
+
 	CAPABILITY_ATTRIBUTE_TYPE_DEFS (Multisampling, GL_MULTISAMPLE);
 	CAPABILITY_ATTRIBUTE_TYPE_DEFS (SampleShading, GL_SAMPLE_SHADING);
 	CAPABILITY_ATTRIBUTE_TYPE_DEFS (AlphaToCoverage, GL_SAMPLE_ALPHA_TO_COVERAGE);
@@ -174,6 +183,10 @@ namespace State {
 	CAPABILITY_ATTRIBUTE_TYPE_DEFS (PointSize, GL_PROGRAM_POINT_SIZE);
 
 	CAPABILITY_ATTRIBUTE_TYPE_DEFS (FrameBufferSRBG, GL_FRAMEBUFFER_SRGB);
+
+	CUSTOM_ATTRIBUTE_TYPE_DEFS     (PixelStoreUnpackAlignment, GL_UNPACK_ALIGNMENT);
+
+	MULTI_CAPABILITY_ATTRIBUTE_TYPE_DEFS (TexTarget, 0);
 
 	extern std::tuple<
 		ATTRIBUTE(PolygonMode),
@@ -218,17 +231,28 @@ namespace State {
 		ATTRIBUTE(PrimitiveRestartIndex),
 		ATTRIBUTE(Multisampling),
 		ATTRIBUTE(SampleShading),
+		ATTRIBUTE(MinSampleShading),
 		ATTRIBUTE(AlphaToCoverage),
 		ATTRIBUTE(AlphaToOne),
 		ATTRIBUTE(CubemapSeamless),
 		ATTRIBUTE(PointSize),
-		ATTRIBUTE(FrameBufferSRBG)
+		ATTRIBUTE(FrameBufferSRBG),
+		ATTRIBUTE(PixelStoreUnpackAlignment),
+		ATTRIBUTE(TexTarget)<GL_TEXTURE_1D>,
+		ATTRIBUTE(TexTarget)<GL_TEXTURE_2D>,
+		ATTRIBUTE(TexTarget)<GL_TEXTURE_3D>,
+		ATTRIBUTE(TexTarget)<GL_TEXTURE_1D_ARRAY>,
+		ATTRIBUTE(TexTarget)<GL_TEXTURE_2D_ARRAY>,
+		ATTRIBUTE(TexTarget)<GL_TEXTURE_RECTANGLE>,
+		ATTRIBUTE(TexTarget)<GL_TEXTURE_CUBE_MAP>,
+		ATTRIBUTE(TexTarget)<GL_TEXTURE_BUFFER>,
+		ATTRIBUTE(TexTarget)<GL_TEXTURE_2D_MULTISAMPLE>,
+		ATTRIBUTE(TexTarget)<GL_TEXTURE_2D_MULTISAMPLE_ARRAY>
 	> Attributes;
 };
 
-#undef ATTRIBUTE
-#undef ATTRIBUTE_TYPE_DEFS
-#undef CAPABILITY_ATTRIBUTE_TYPE_DEFS
-#undef MULTI_CAPABILITY_ATTRIBUTE_TYPE_DEFS
-
+	#undef ATTRIBUTE
+	#undef ATTRIBUTE_TYPE_DEFS
+	#undef CAPABILITY_ATTRIBUTE_TYPE_DEFS
+	#undef MULTI_CAPABILITY_ATTRIBUTE_TYPE_DEFS
 }

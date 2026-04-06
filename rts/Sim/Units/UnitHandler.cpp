@@ -28,15 +28,13 @@
 #include "System/TimeProfiler.h"
 #include "System/creg/STL_Deque.h"
 #include "System/creg/STL_Set.h"
-#include "System/Threading/ThreadPool.h"
 #include "Sim/Path/HAPFS/PathGlobal.h"
 
 #include "System/Misc/TracyDefs.h"
 
 #include "System/Config/ConfigHandler.h"
-CONFIG(bool, UpdateWeaponVectorsMT).defaultValue(true).safemodeValue(false).minimumValue(false).description("Enable multithreaded update of weapon vectors");
-CONFIG(bool, UpdateBoundingVolumeMT).defaultValue(true).safemodeValue(false).minimumValue(false).description("Enable multithreaded update of unit bounding volumes");
-
+CONFIG(bool, UpdateWeaponVectorsMT).deprecated(true);
+CONFIG(bool, UpdateBoundingVolumeMT).deprecated(true);
 
 
 CR_BIND(CUnitHandler, )
@@ -222,7 +220,6 @@ bool CUnitHandler::AddUnit(CUnit* unit)
 	assert(CanAddUnit(unit->id));
 
 	InsertActiveUnit(unit);
-
 	teamHandler.Team(unit->team)->AddUnit(unit, CTeam::AddBuilt);
 
 	// 0 is not a valid UnitDef id, so just use unitsByDefs[team][0]
@@ -290,6 +287,7 @@ void CUnitHandler::DeleteUnit(CUnit* delUnit)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	assert(delUnit->isDead);
+
 	// we want to call RenderUnitDestroyed while the unit is still valid
 	eventHandler.RenderUnitDestroyed(delUnit);
 
@@ -386,16 +384,9 @@ void CUnitHandler::SlowUpdateUnits()
 	// They dont have much of an effect if updated late-ish.
 	{
 		ZoneScopedN("Sim::Unit::SlowUpdateMT");
-		if (configHandler->GetBool("UpdateBoundingVolumeMT")) {
-			for_mt(0, updateBoundingVolumeList.size(), [](int i) {
-				updateBoundingVolumeList[i]->localModel.UpdateBoundingVolume();
-			});
-		}
-		else {
-			for(size_t i = 0; i < updateBoundingVolumeList.size(); ++i) {
-				updateBoundingVolumeList[i]->localModel.UpdateBoundingVolume();
-			}
-		}
+		for_mt(0, updateBoundingVolumeList.size(), [](int i) {
+			updateBoundingVolumeList[i]->localModel.UpdateBoundingVolume();
+		});
 	}
 }
 
@@ -423,18 +414,10 @@ void CUnitHandler::UpdateUnitWeapons()
 	{
 		SCOPED_TIMER("Sim::Unit::UpdateWeaponVectors");
 
-		if (configHandler->GetBool("UpdateWeaponVectorsMT")) {
-			for_mt_chunk(0, activeUnits.size(), [&](const int idx) {
-				auto unit = activeUnits[idx];
-				unit->UpdateWeaponVectors();
-			});
-		}
-		else {
-			for (size_t idx = 0; idx < activeUnits.size(); ++idx) {
-				auto unit = activeUnits[idx];
-				unit->UpdateWeaponVectors();
-			}
-		}
+		for_mt_chunk(0, activeUnits.size(), [&](const int idx) {
+			auto unit = activeUnits[idx];
+			unit->UpdateWeaponVectors();
+		});
 	}
 	{
 		SCOPED_TIMER("Sim::Unit::Weapon");
@@ -444,6 +427,17 @@ void CUnitHandler::UpdateUnitWeapons()
 	}
 }
 
+void CUnitHandler::UpdatePreFrame()
+{
+	SCOPED_TIMER("Sim::Unit::UpdatePreFrame");
+	inUpdateCall = true;
+
+	for (CUnit* unit : activeUnits) {
+		unit->UpdatePrevFrameTransform();
+	}
+
+	inUpdateCall = false;
+}
 
 void CUnitHandler::Update()
 {
@@ -460,7 +454,17 @@ void CUnitHandler::Update()
 	inUpdateCall = false;
 }
 
+void CUnitHandler::UpdatePostAnimation()
+{
+	SCOPED_TIMER("Sim::Unit::UpdatePostAnimation");
+	inUpdateCall = true;
 
+	for (auto* unit : activeUnits) {
+		unit->UpdateTransportees();
+	}
+
+	inUpdateCall = false;
+}
 
 void CUnitHandler::AddBuilderCAI(CBuilderCAI* b)
 {

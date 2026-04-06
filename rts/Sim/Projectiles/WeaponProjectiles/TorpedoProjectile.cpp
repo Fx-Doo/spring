@@ -131,7 +131,16 @@ void CTorpedoProjectile::Update()
 				CWorldObject::SetVelocity(targetHitVel);
 			}
 
-			explGenHandler.GenExplosion(cegID, pos, speed, ttl, damages->damageAreaOfEffect, 0.0f, owner(), nullptr);
+			explGenHandler.GenExplosion(
+				cegID,
+				pos,
+				speed,
+				ttl,
+				damages->damageAreaOfEffect,
+				0.0f,
+				owner(),
+				ExplosionHitObject()
+			);
 		} else {
 			if (!luaMoveCtrl) {
 				// must update dir and speed.w here
@@ -172,7 +181,7 @@ void CTorpedoProjectile::Draw()
 	if (model != nullptr)
 		return;
 
-	//UpdateWeaponAnimParams();
+	//UpdateAnimParams();
 
 	float3 r = dir.cross(UpVector);
 
@@ -185,56 +194,66 @@ void CTorpedoProjectile::Draw()
 	const float w = 2;
 	const SColor col(60, 60, 100, 255);
 
-	AddWeaponEffectsQuad<0>(
+	const auto& pageNum = projectileDrawer->torpedotex->pageNum;
+
+	AddEffectsQuad<0>(
+		pageNum,
 		{ drawPos + (r * w),             texx, texy, col },
 		{ drawPos + (u * w),             texx, texy, col },
 		{ drawPos + (u * w) + (dir * h), texx, texy, col },
 		{ drawPos + (r * w) + (dir * h), texx, texy, col }
 	);
 
-	AddWeaponEffectsQuad<0>(
+	AddEffectsQuad<0>(
+		pageNum,
 		{ drawPos + (u * w),             texx, texy, col },
 		{ drawPos - (r * w),             texx, texy, col },
 		{ drawPos - (r * w) + (dir * h), texx, texy, col },
 		{ drawPos + (u * w) + (dir * h), texx, texy, col }
 	);
 
-	AddWeaponEffectsQuad<0>(
+	AddEffectsQuad<0>(
+		pageNum,
 		{ drawPos - (r * w),             texx, texy, col },
 		{ drawPos - (u * w),             texx, texy, col },
 		{ drawPos - (u * w) + (dir * h), texx, texy, col },
 		{ drawPos - (r * w) + (dir * h), texx, texy, col }
 	);
 
-	AddWeaponEffectsQuad<0>(
+	AddEffectsQuad<0>(
+		pageNum,
 		{ drawPos - (u * w),             texx, texy, col },
 		{ drawPos + (r * w),             texx, texy, col },
 		{ drawPos + (r * w) + (dir * h), texx, texy, col },
 		{ drawPos - (u * w) + (dir * h), texx, texy, col }
 	);
 
-	AddWeaponEffectsQuad<0>(
+	AddEffectsQuad<0>(
+		pageNum,
 		{ drawPos + (r * w) + (dir * h), texx, texy, col },
 		{ drawPos + (u * w) + (dir * h), texx, texy, col },
 		{ drawPos + (dir * h * 1.2f),    texx, texy, col },
 		{ drawPos + (dir * h * 1.2f),    texx, texy, col }
 	);
 
-	AddWeaponEffectsQuad<0>(
+	AddEffectsQuad<0>(
+		pageNum,
 		{ drawPos + (u * w) + (dir * h), texx, texy, col },
 		{ drawPos - (r * w) + (dir * h), texx, texy, col },
 		{ drawPos + (dir * h * 1.2f),    texx, texy, col },
 		{ drawPos + (dir * h * 1.2f),    texx, texy, col }
 	);
 
-	AddWeaponEffectsQuad<0>(
+	AddEffectsQuad<0>(
+		pageNum,
 		{ drawPos - (r * w) + (dir * h), texx, texy, col },
 		{ drawPos - (u * w) + (dir * h), texx, texy, col },
 		{ drawPos + (dir * h * 1.2f),    texx, texy, col },
 		{ drawPos + (dir * h * 1.2f),    texx, texy, col }
 	);
 
-	AddWeaponEffectsQuad<0>(
+	AddEffectsQuad<0>(
+		pageNum,
 		{ drawPos - (u * w) + (dir * h), texx, texy, col },
 		{ drawPos + (r * w) + (dir * h), texx, texy, col },
 		{ drawPos + (dir * h * 1.2f),    texx, texy, col },

@@ -1,12 +1,12 @@
 /* This file is part of the Spring engine (GPL v2 or later), see LICENSE.html */
 
-#ifndef IATLAS_ALLOC_H
-#define IATLAS_ALLOC_H
+#pragma once
 
 #include <string>
 #include <limits>
+#include <cstdint>
 
-#include "System/float4.h"
+#include "AtlasedTexture.hpp"
 #include "System/type2.h"
 #include "System/UnorderedMap.hpp"
 #include "System/StringHash.h"
@@ -18,87 +18,61 @@ class IAtlasAllocator
 public:
 	struct SAtlasEntry
 	{
-		SAtlasEntry() : data(nullptr) {}
-		SAtlasEntry(const int2 _size, std::string _name, void* _data = nullptr)
-			: size(_size)
-			, name(std::move(_name))
-			, data(_data)
-		{}
+		SAtlasEntry();
+		SAtlasEntry(const int2 _size, std::string _name);
 
 		int2 size;
 		std::string name;
-		float4 texCoords;
-		void* data;
+		AtlasedTexture texCoords;
 	};
 public:
-	IAtlasAllocator() = default;
-	virtual ~IAtlasAllocator() {}
+	IAtlasAllocator();
+	virtual ~IAtlasAllocator();
 
-	void SetMaxSize(int xsize, int ysize) { maxsize = int2(xsize, ysize); }
+	void SetMaxSize(uint32_t xsize, uint32_t ysize);
 public:
 	virtual bool Allocate() = 0;
 	virtual int GetNumTexLevels() const = 0;
-	void SetMaxTexLevel(int maxLevels) { numLevels = maxLevels; };
+	virtual int GetReqNumTexLevels() const = 0;
+	virtual uint32_t GetNumPages() const = 0;
+	void SetMaxTexLevel(int maxLevels);
 public:
-	void AddEntry(const std::string& name, int2 size, void* data = nullptr)
-	{
-		minDim = argmin(minDim, size.x, size.y);
-		entries[name] = SAtlasEntry(size, name, data);
-	}
+	void AddEntry(const SAtlasEntry& ae);
+	void AddEntry(const std::string& name, const int2& size);
 
-	float4 GetEntry(const std::string& name)
-	{
-		return entries[name].texCoords;
-	}
+	int GetPadding() const;
 
-	void*& GetEntryData(const std::string& name)
-	{
-		return entries[name].data;
-	}
+	void SizeRoundUp();
 
-	const spring::unordered_map<std::string, SAtlasEntry>& GetEntries() const { return entries; }
+	spring::unordered_map<std::string, SAtlasEntry>::const_iterator FindEntry(const std::string& name) const;
 
-	float4 GetTexCoords(const std::string& name)
-	{
-		float4 uv(entries[name].texCoords);
-		uv.x1 /= atlasSize.x;
-		uv.y1 /= atlasSize.y;
-		uv.x2 /= atlasSize.x;
-		uv.y2 /= atlasSize.y;
+	const AtlasedTexture& GetEntry(const spring::unordered_map<std::string, SAtlasEntry>::const_iterator& it) const;
+	const AtlasedTexture& GetEntry(const std::string& name) const;
+	const spring::unordered_map<std::string, SAtlasEntry>& GetEntries() const;
 
-		// adjust texture coordinates by half a texel (opengl uses centeroids)
-		uv.x1 += 0.5f / atlasSize.x;
-		uv.y1 += 0.5f / atlasSize.y;
-		uv.x2 += 0.5f / atlasSize.x;
-		uv.y2 += 0.5f / atlasSize.y;
+	// pixel center based UV
+	AtlasedTexture GetTexCoordsCntr(const spring::unordered_map<std::string, SAtlasEntry>::const_iterator& it) const;
 
-		return uv;
-	}
+	// pixel edges based UV
+	AtlasedTexture GetTexCoordsEdge(const spring::unordered_map<std::string, SAtlasEntry>::const_iterator& it) const;
 
-	bool contains(const std::string& name) const
-	{
-		return entries.contains(name);
-	}
+	AtlasedTexture GetTexCoordsCntr(const std::string& name) const;
+	AtlasedTexture GetTexCoordsEdge(const std::string& name) const;
+
+	bool contains(const std::string& name) const;
 
 	//! note: it doesn't clear the atlas! it only clears the entry db!
-	void clear()
-	{
-		minDim = std::numeric_limits<int>::max();
-		entries.clear();
-	}
+	void clear();
 
-	int GetMinDim() const { return minDim < std::numeric_limits<int>::max() ? minDim : 1; }
+	int GetMinDim() const;
 
-	int2 GetMaxSize() const { return maxsize; }
-	int2 GetAtlasSize() const { return atlasSize; }
-
+	const auto& GetMaxSize() const { return maxsize; }
+	const auto& GetAtlasSize() const { return atlasSize; }
 protected:
 	spring::unordered_map<std::string, SAtlasEntry> entries;
 
-	int2 atlasSize;
-	int2 maxsize = {2048, 2048};
+	uint2 atlasSize;
+	uint2 maxsize = {2048, 2048};
 	int numLevels = std::numeric_limits<int>::max();
 	int minDim = std::numeric_limits<int>::max();
 };
-
-#endif // IATLAS_ALLOC_H

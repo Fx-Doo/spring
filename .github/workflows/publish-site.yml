@@ -3,62 +3,97 @@ on:
   schedule:
     - cron: "0 0 * * *"
   workflow_dispatch:
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+env:
+  RECOIL_LUA_LIBRARY_DIR: "rts/Lua/library"
+  LUA_DOC_EXTRACTOR_SOURCE_REF: "https://github.com/${{ github.repository }}/blob/${{ github.sha }}"
+  HUGO_VERSION: "0.147.9"
+  LUA_DOC_EXTRACTOR_VERSION: "3"
+  EMMYLUA_DOC_CLI_VERSION: "0.8.2"
+  JQ_VERSION: "1.8.0"
+  7Z_VERSION: "24.09"
+  RUBY_VERSION: "3.3"
+  MISE_ENV: "ci"
 jobs:
-  publish:
-    name: Publish Site
+  build:
+    if: github.repository == 'beyond-all-reason/RecoilEngine' || github.event_name == 'workflow_dispatch'
+    name: Build
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    # Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
+    # However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
+    concurrency:
+      group: "pages"
+      cancel-in-progress: false
     steps:
       - name: Install Dependencies
         run: |
           sudo apt-get update -y
-          sudo apt-get install --fix-missing -y jq p7zip-full libsdl2-2.0-0 libopenal1
-      - name: Set up Homebrew
-        id: set-up-homebrew
-        uses: Homebrew/actions/setup-homebrew@master
-      - name: Install Lua Language Server
-        run: |
-          brew install lua-language-server
+          sudo apt-get install --fix-missing -y libsdl2-2.0-0 libopenal1 curl
       - name: Checkout Source Repository
-        uses: actions/checkout@v2
-      - name: Generate Dynamic Content
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          sparse-checkout: |
+            doc/site
+            rts/Lua
+            rts/Rml/SolLua
+      - name: Cache Restore
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ runner.temp }}/hugo_cache
+          key: hugo-${{ github.run_id }}
+          restore-keys:
+            hugo-
+      - name: Configure Git
+        run: git config core.quotepath false
+      - name: Setup Pages
+        id: pages
+        uses: actions/configure-pages@v5
+      - name: Setup Mise
+        uses: jdx/mise-action@v2
+        with:
+          working_directory: doc/site # [default: .] directory to run mise in
+      - name: Build with Hugo
+        env:
+          HUGO_GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HUGO_CACHEDIR: ${{ runner.temp }}/hugo_cache
+          HUGO_ENVIRONMENT: production
+        working-directory: ./doc/site
         run: |
-          bash doc/site/_scripts/get_release_data.sh
-          bash doc/site/_scripts/get_engine_data.sh
-          git add -f doc/site/_data
-      # NOTE: This step is duplicated in `generate-lua-library.yml`
-      - name: Generate Lua library
-        working-directory: rts/Lua/
-        run: |
-          npm install -g lua-doc-extractor
-          lua-doc-extractor *.cpp --dest library/generated
-      # NOTE: Running LLS 3.13.4 from a subdirectory with a relative path seems
-      # to cause duplicate class fields to be generated. Presumably a bug in
-      # LLS.
-      - name: Export Lua data using Lua Language Server
-        run: |
-          lua-language-server --doc rts/Lua/library --doc_out_path doc/site/_data
-          git add -f doc/site/_data
-      - name: Commit changes
-        run: |
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "github-actions[bot]"
-          git commit -m "Update doc/site"
-      - name: Check if gh-pages exists
-        id: check-ghpages
-        run: |
-          git fetch origin gh-pages
-          git ls-remote --exit-code . origin/gh-pages && (echo "exists=true" > $GITHUB_OUTPUT) || (echo "exists=false" > $GITHUB_OUTPUT)
-      - name: Check changes to doc/site
-        id: site-changes
-        if: steps.check-ghpages.outputs.exists == 'true'
-        run: |
-          git diff --stat origin/gh-pages ${{ github.ref_name }}:doc/site
-          git diff --quiet origin/gh-pages ${{ github.ref_name }}:doc/site && (echo "modified=false" > $GITHUB_OUTPUT) || (echo "modified=true" > $GITHUB_OUTPUT)
-      - name: Push gh-pages # Only push gh-pages if doc/site/ was changed or ldoc did changes
-        if: steps.check-ghpages.outputs.exists == 'false' || steps.site-changes.outputs.modified == 'true'
-        run: |
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/$GITHUB_REPOSITORY
-          git subtree split --prefix=doc/site --rejoin -b gh-pages
-          git push origin gh-pages --force
+          mise run lua_pages
+          mise run binary_pages
+          mise exec hugo -- \
+            hugo \
+            --gc \
+            --minify \
+            --baseURL "${{ steps.pages.outputs.base_url }}/"
+      - name: Cache Save
+        id: cache-save
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ runner.temp }}/hugo_cache
+          key: ${{ steps.cache-restore.outputs.cache-primary-key }}
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: doc/site/public
+
+  # Deployment job
+  deploy:
+    name: Deploy
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

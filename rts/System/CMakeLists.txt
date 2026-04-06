@@ -1,5 +1,7 @@
 
-if (TRACY_PROFILE_MEMORY)
+# When USE_MIMALLOC is enabled, MemoryOverride.cpp handles operator new/delete with Tracy tracking.
+# Only compile TraceMemory.cpp when Tracy memory profiling is enabled but mimalloc is not used.
+if (TRACY_PROFILE_MEMORY AND NOT USE_MIMALLOC)
 	set(memoryProfileSource "${CMAKE_CURRENT_SOURCE_DIR}/TraceMemory.cpp")
 endif()
 
@@ -41,9 +43,9 @@ make_global_var(sources_engine_System_common
 		"${CMAKE_CURRENT_SOURCE_DIR}/GameLoadThread.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Option.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Clipboard.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/ConsoleInit.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/errorhandler.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Misc.cpp"
-		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/SharedLib.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/ScopedFileLock.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/SDL1_keysym.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Watchdog.cpp"
@@ -55,6 +57,7 @@ make_global_var(sources_engine_System_common
 		"${CMAKE_CURRENT_SOURCE_DIR}/SpringApp.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/StartScriptGen.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Sync/DumpState.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Sync/DumpHistory.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Sync/FPUCheck.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Sync/Logger.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Sync/SHA512.cpp"
@@ -74,7 +77,7 @@ make_global_var(sources_engine_System_common
 		"${CMAKE_CURRENT_SOURCE_DIR}/float3.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/float4.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/SpringMath.cpp"
-		"${CMAKE_CURRENT_SOURCE_DIR}/SpringMem.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/MemoryOverride.cpp"
 		"${memoryProfileSource}"
 	)
 if    (NO_CREG)
@@ -98,7 +101,6 @@ make_global_var(sources_engine_System_FileSystem
 		"${CMAKE_CURRENT_SOURCE_DIR}/FileSystem/FileFilter.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/FileSystem/FileHandler.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/FileSystem/FileSystem.cpp"
-		"${CMAKE_CURRENT_SOURCE_DIR}/FileSystem/FileSystemAbstraction.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/FileSystem/FileSystemInitializer.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/FileSystem/GZFileHandler.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/FileSystem/Misc.cpp"
@@ -127,6 +129,8 @@ make_global_var(sources_engine_System_Log_sinkFile
 make_global_var(sources_engine_System_Log_sinkOutputDebugString
 		"${CMAKE_CURRENT_SOURCE_DIR}/Log/OutputDebugStringSink.cpp"
 	)
+
+# Warning: sources_engine_System_Platform_* is not used by spring-dedicated
 set(sources_engine_System_Platform_Linux
 		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Linux/CrashHandler.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Linux/Hardware.cpp"
@@ -144,7 +148,6 @@ set(sources_engine_System_Platform_Mac
 	)
 set(sources_engine_System_Platform_Windows
 		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Win/CrashHandler.cpp"
-		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Win/DllLib.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Win/Hardware.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Win/MessageBox.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Win/seh.cpp"
@@ -156,12 +159,16 @@ set(sources_engine_System_Threading_Mac
 		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Mac/Signal.cpp"
 	)
 set(sources_engine_System_Threading_Linux
+		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Linux/CpuTopology.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Linux/Futex.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Linux/ThreadSupport.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Linux/SoLib.cpp"
 	)
 set(sources_engine_System_Threading_Windows
+		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Win/CpuTopology.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Win/CriticalSection.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Win/Future.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Win/DllLib.cpp"
 	)
 
 
@@ -180,6 +187,8 @@ endif()
 set(sources_engine_System_Threading
 		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/CpuID.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/Threading.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/ThreadAffinityGuard.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Platform/SharedLib.cpp"
 	)
 
 set(sources_engine_System
@@ -226,3 +235,10 @@ endif  ()
 
 add_subdirectory(FileSystem)
 add_subdirectory(Net)
+
+# Natvis files for MSVC debugging visualization
+set(RECOIL_NATVIS_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/SpringHashMap.natvis"
+    "${CMAKE_CURRENT_SOURCE_DIR}/SpringHashSet.natvis"
+    CACHE INTERNAL "Recoil Natvis files for MSVC debugging"
+)

@@ -1,6 +1,5 @@
 /* This file is part of the Spring engine (GPL v2 or later), see LICENSE.html */
 
-
 #include "SolidObject.h"
 #include "SolidObjectDef.h"
 #include "Map/ReadMap.h"
@@ -52,6 +51,8 @@ CR_REG_METADATA(CSolidObject,
 	CR_MEMBER(team),
 	CR_MEMBER(allyteam),
 
+	CR_MEMBER(creationFrame),
+
 	CR_MEMBER(pieceHitFrames),
 
 	CR_MEMBER(moveDef),
@@ -83,6 +84,10 @@ CR_REG_METADATA(CSolidObject,
 	CR_POSTLOAD(PostLoad)
 ))
 
+
+CSolidObject::CSolidObject()
+	: creationFrame { gs->frameNum }
+{}
 
 void CSolidObject::PostLoad()
 {
@@ -139,6 +144,17 @@ void CSolidObject::UpdatePhysicalState(float eps)
 	assert((IsInAir() != IsInWater()) || IsOnGround());
 	assert((IsInAir() != IsUnderWater()) || (IsOnGround() || IsInWater()));
 	#endif
+}
+
+void CSolidObject::Move(const float3& v, bool relative)
+{
+	const float3& dv = relative ? v : (v - pos);
+
+	pos    += dv;
+	midPos += dv;
+	aimPos += dv;
+
+	CondUpdatePrevTransform();
 }
 
 
@@ -292,6 +308,11 @@ YardMapStatus CSolidObject::GetGroundBlockingMaskAtPos(float3 gpos) const
 	return blockMap[bx + by*footprint.x];
 }
 
+
+// unsynced mid-{position,vector}s
+float3 CSolidObject::GetMdlDrawMidPos() const { return (GetObjectSpaceDrawPos(WORLD_TO_OBJECT_SPACE * localModel.GetRelMidPos())); }
+float3 CSolidObject::GetObjDrawMidPos() const { return (GetObjectSpaceDrawPos(WORLD_TO_OBJECT_SPACE * relMidPos                )); }
+
 int2 CSolidObject::GetMapPosStatic(const float3& position, int xsize, int zsize)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -314,10 +335,23 @@ float3 CSolidObject::GetDragAccelerationVec(float atmosphericDensity, float wate
 	//
 	// params.xyzw map: {{atmosphere, water}Density, {drag, friction}Coefficient}
 	//
+
+	static constexpr auto STOPPING_SPEED = 0.5f;
+	// prevent eternal crawling, also exit early for static objects
+	if (const float perSecSpeed = speed.w * GAME_SPEED; perSecSpeed < STOPPING_SPEED) {
+		return float3(-speed.x, -speed.y, -speed.z);
+	}
+
+	// Typical radiuses in Elmo make no sense given the mass and the fact the robots are made from metal (some heavy alloy)
+	// kg / m3
+	static constexpr float MATERIAL_DENSITY = 8000.0f;
+	const float assumedRadius = math::cbrtf((3.0f * mass) / (4.0f * math::PI * MATERIAL_DENSITY));
+	const float assumedSectionArea = math::PI * assumedRadius * assumedRadius;
+
 	const float3 speedSignVec = float3(Sign(speed.x), Sign(speed.y), Sign(speed.z));
 	const float3 dragScaleVec = float3(
-		(IsInAir() || IsOnGround()) * dragScales.x * (0.5f * atmosphericDensity * dragCoeff * (math::PI * sqRadius * 0.01f * 0.01f)), // air
-		IsInWater()                 * dragScales.y * (0.5f * waterDensity * dragCoeff * (math::PI * sqRadius * 0.01f * 0.01f)), // water
+		(IsInAir() || IsOnGround()) * dragScales.x * (0.5f * atmosphericDensity * dragCoeff * assumedSectionArea), // air
+		IsInWater()                 * dragScales.y * (0.5f * waterDensity * dragCoeff * assumedSectionArea), // water
 		IsOnGround()                * dragScales.z * (frictionCoeff * mass)  // ground
 	);
 
@@ -364,7 +398,7 @@ float3 CSolidObject::GetWantedUpDir(bool useGroundNormal, bool useObjectNormal, 
 
 
 
-void CSolidObject::SetDirVectorsEuler(const float3 angles)
+void CSolidObject::SetDirVectorsEuler(const float3& angles)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	CMatrix44f matrix;
@@ -385,7 +419,7 @@ void CSolidObject::SetHeadingFromDirection() {
 	quat.ANormalize();
 
 	const float3 fDir = quat * frontdir;
-	assert(epscmp(fDir.y, 0.0f, float3::cmp_eps()));
+	assert(epscmp(fDir.y, 0.0f, float3::apx_eps()));
 
 	heading = GetHeadingFromVector(fDir.x, fDir.z);
 }
@@ -416,6 +450,26 @@ void CSolidObject::UpdateDirVectors(const float3& uDir)
 	updir = uDir;
 }
 
+void CSolidObject::CondUpdatePrevTransform()
+{
+	// copy every transformation happening on the creation frame
+	// into PrevFrameTransform state
+	// skip otherwise
+	if likely(creationFrame != gs->frameNum)
+		return;
+
+	UpdatePrevFrameTransform();
+}
+
+void CSolidObject::UpdatePrevFrameTransform()
+{
+	for (auto& lmp : localModel.pieces) {
+		lmp.SavePrevModelSpaceTransform();
+	}
+
+	preFrameTra = Transform{ CQuaternion::MakeFrom(GetTransformMatrix(true)), pos };
+}
+
 void CSolidObject::ForcedSpin(const float3& zdir)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -438,6 +492,20 @@ void CSolidObject::ForcedSpin(const float3& zdir)
 	UpdateMidAndAimPos();
 }
 
+void CSolidObject::ForcedSpin(const float3& newFrontDir, const float3& newRightDir)
+{
+	// new front & right directions should be normalized
+	assert(math::fabsf(newFrontDir.SqLength() - 1.0f) <= float3::cmp_eps());
+	assert(math::fabsf(newRightDir.SqLength() - 1.0f) <= float3::cmp_eps());
+
+	frontdir = newFrontDir;
+	rightdir = newRightDir;
+	   updir = (newRightDir.cross(newFrontDir)).Normalize();
+
+	SetHeadingFromDirection();
+	UpdateMidAndAimPos();
+}
+
 
 
 void CSolidObject::Kill(CUnit* killer, const float3& impulse, bool crushed)
@@ -447,7 +515,20 @@ void CSolidObject::Kill(CUnit* killer, const float3& impulse, bool crushed)
 	DoDamage(DamageArray(health + 1.0f), impulse, killer, crushed? -DAMAGE_EXTSOURCE_CRUSHED: -DAMAGE_EXTSOURCE_KILLED, -1);
 }
 
+const CollisionVolume* CSolidObject::GetCollisionVolume(const LocalModelPiece* lmp) const {
+	if (lmp == nullptr)
+		return &collisionVolume;
+	if (!collisionVolume.DefaultToPieceTree())
+		return &collisionVolume;
 
+	return (lmp->GetCollisionVolume());
+}
+
+      LuaObjectMaterialData* CSolidObject::GetLuaMaterialData()       { return (localModel.GetLuaMaterialData()); }
+const LuaObjectMaterialData* CSolidObject::GetLuaMaterialData() const { return (localModel.GetLuaMaterialData()); }
+
+
+float CSolidObject::GetDrawRadius() const { return localModel.GetDrawRadius(); }
 
 float CSolidObject::CalcFootPrintMinExteriorRadius(float scale) const { return ((math::sqrt((xsize * xsize + zsize * zsize)) * 0.5f * SQUARE_SIZE) * scale); }
 float CSolidObject::CalcFootPrintMaxInteriorRadius(float scale) const { return ((std::max(xsize, zsize) * 0.5f * SQUARE_SIZE) * scale); }

@@ -1,13 +1,51 @@
-
 INCLUDE_DIRECTORIES(${CMAKE_SOURCE_DIR}/rts)
 INCLUDE_DIRECTORIES(${CMAKE_SOURCE_DIR}/rts/lib)
 
+ADD_SUBDIRECTORY(fmt)
+set_target_properties(fmt PROPERTIES POSITION_INDEPENDENT_CODE ON)
 ADD_SUBDIRECTORY(glad)
 ADD_SUBDIRECTORY(smmalloc)
-ADD_SUBDIRECTORY(libcpuid)
+
+# Mimalloc - only build if USE_MIMALLOC is enabled
+if (USE_MIMALLOC)
+	# Disable mimalloc's built-in override - we provide our own custom override
+	set(MI_OVERRIDE OFF CACHE BOOL "Disable mimalloc built-in override" FORCE)
+	# Disable mimalloc tests and shared library to speed up build
+	set(MI_BUILD_TESTS OFF CACHE BOOL "Disable mimalloc tests" FORCE)
+	set(MI_BUILD_SHARED OFF CACHE BOOL "Disable mimalloc shared library" FORCE)
+	set(MI_BUILD_STATIC ON CACHE BOOL "Enable mimalloc static library" FORCE)
+
+	# Integrate ASAN/Valgrind tracking with mimalloc
+	# When the engine is built with USE_ASAN, enable MI_TRACK_ASAN for mimalloc
+	# When the engine is built with USE_VALGRIND, enable MI_TRACK_VALGRIND for mimalloc
+	if (USE_ASAN)
+		set(MI_TRACK_ASAN ON CACHE BOOL "Enable mimalloc ASAN support" FORCE)
+	endif()
+	if (VALGRIND_FOUND)
+		set(MI_TRACK_VALGRIND ON CACHE BOOL "Enable mimalloc Valgrind support" FORCE)
+	endif()
+
+	if(MINGW)
+		# Temporarily remove _WIN32_WINNT to avoid redefinition warning with mimalloc
+		# mimalloc defines _WIN32_WINNT=0x600 for MinGW in its CMakeLists.txt
+		remove_definitions(-D_WIN32_WINNT=0x0601)
+
+		# Suppress visibility attribute warnings for ALL mimalloc targets.
+		add_compile_options(-Wno-attributes)
+	endif()
+
+	ADD_SUBDIRECTORY(mimalloc)
+
+	if(MINGW)
+		# Restore _WIN32_WINNT definition after mimalloc
+		add_definitions(-D_WIN32_WINNT=0x0601)
+	endif()
+endif()
+
 ADD_SUBDIRECTORY(lua)
 ADD_SUBDIRECTORY(luasocket)
 ADD_SUBDIRECTORY(minizip)
+ADD_SUBDIRECTORY(nowide)
 ADD_SUBDIRECTORY(headlessStubs)
 if (ENABLE_STREFLOP)
 ADD_SUBDIRECTORY(streflop)
@@ -23,7 +61,14 @@ SET(GFLAGS_INSTALL_HEADERS            FALSE)
 SET(GFLAGS_INSTALL_SHARED_LIBS        FALSE)
 SET(GFLAGS_INSTALL_STATIC_LIBS        FALSE)
 
+#Meh-meh
+if (WIN32)
+	remove_definitions(-DUNICODE -D_UNICODE)
+endif()
 ADD_SUBDIRECTORY(gflags)
+if (WIN32)
+	add_definitions(-DUNICODE -D_UNICODE)
+endif()
 
 
 # to change assimp for springs need, see fix_assimp.sh
@@ -49,22 +94,44 @@ foreach(var
 		ASSIMP_BUILD_NONFREE_C4D_IMPORTER
 		ASSIMP_DOUBLE_PRECISION
 	)
-	set("${var}" OFF CACHE STRING "forced off by spring build env" FORCE)
+	set("${var}" OFF CACHE STRING "forced by Recoil build env" FORCE)
 endforeach()
 
 foreach(var
 		${ENABLED_ASSIMP_FORMATS}
 	)
-	set("${var}" ON CACHE STRING "forced on by spring build env" FORCE)
+	set("${var}" ON CACHE STRING "forced by Recoil build env" FORCE)
 endforeach()
 
 foreach(var ASSIMP_BUILD_STATIC_LIB ASSIMP_NO_EXPORT)
 	message(STATUS "Forcing assimp option ${var} to on")
-	set("${var}" ON CACHE STRING "forced on by spring build env" FORCE)
+	set("${var}" ON CACHE STRING "forced by Recoil build env" FORCE)
 endforeach()
 
 ADD_SUBDIRECTORY(assimp)
 target_compile_definitions(assimp PRIVATE -DASSIMP_BUILD_NO_OWN_ZLIB)
+
+# simdjson, a fastgltf dependency (manually added to submodules to work around the build system limitations)
+set(SIMDJSON_AVX512_ALLOWED OFF CACHE BOOL "forced by Recoil build env" FORCE)
+set(SIMDJSON_BASH OFF CACHE BOOL "forced by Recoil build env" FORCE)
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|armv8")
+	# ARM64: enable native NEON implementation (well-tested in simdjson)
+	set(SIMDJSON_IMPLEMENTATION "arm64" CACHE STRING "forced by Recoil build env" FORCE)
+else()
+	# x86: use fallback only (original behavior)
+	set(SIMDJSON_IMPLEMENTATION "fallback" CACHE STRING "forced by Recoil build env" FORCE)
+endif()
+
+set(SIMDJSON_ENABLE_THREADS     OFF CACHE BOOL "forced by Recoil build env" FORCE)
+set(SIMDJSON_EXCEPTIONS     ON CACHE BOOL "forced by Recoil build env" FORCE)
+ADD_SUBDIRECTORY(simdjson)
+
+# fastgltf
+set(FASTGLTF_COMPILE_AS_CPP20 ON CACHE BOOL "forced by Recoil build env" FORCE)
+set(FASTGLTF_USE_64BIT_FLOAT OFF CACHE BOOL "forced by Recoil build env" FORCE)
+set(FASTGLTF_USE_CUSTOM_SMALLVECTOR OFF CACHE BOOL "forced by Recoil build env" FORCE)
+ADD_SUBDIRECTORY(fastgltf)
 
 ADD_SUBDIRECTORY(squish)
 ADD_SUBDIRECTORY(rg-etc1)
@@ -86,7 +153,7 @@ if (TRACY_ENABLE)
 	option(RMLUI_TRACY_PROFILING "Enable RmlUi profiling with Tracy." ON)
 	# We have our own memory profiling, never enable RmlUi one.
 	set(RMLUI_TRACY_MEMORY_PROFILING OFF CACHE BOOL "Enable RmlUi tracy profiling")
-	
+
 	# Disable the additional RmlUI multiconfig configuration as it only applies to RmlUI
 	set(RMLUI_TRACY_CONFIGURATION OFF CACHE BOOL "" FORCE)
 endif()
@@ -104,5 +171,4 @@ set(CMAKE_CXX_FLAGS ${NEW_CMAKE_FLAGS})
 add_subdirectory(lunasvg)
 set(CMAKE_CXX_FLAGS ${SAVED_CMAKE_FLAGS})
 
-option(RMLUI_SVG_PLUGIN "RmlUi with SVG support" ON)
 add_subdirectory(RmlUi)

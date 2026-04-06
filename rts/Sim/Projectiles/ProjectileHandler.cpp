@@ -198,7 +198,7 @@ void CProjectileHandler::UpdateProjectilesImpl()
 			assert(p != nullptr);
 
 			MAPPOS_SANITY_CHECK(p->pos);
-
+			p->PreUpdate();
 			p->Update();
 			quadField.MovedProjectile(p);
 
@@ -212,6 +212,7 @@ void CProjectileHandler::UpdateProjectilesImpl()
 			assert(p != nullptr);
 
 			MAPPOS_SANITY_CHECK(p->pos);
+			p->PreUpdate();
 			p->Update();
 			MAPPOS_SANITY_CHECK(p->pos);
 		});
@@ -297,6 +298,8 @@ void CProjectileHandler::DestroyProjectile(CProjectile* p)
 	eventHandler.RenderProjectileDestroyed(p);
 
 	if (p->synced) {
+		//modelUniformsStorage.DelObject(p);
+
 		eventHandler.ProjectileDestroyed(p, p->GetAllyteamID());
 
 		projectiles[true].Del(p->id);
@@ -608,9 +611,10 @@ void CProjectileHandler::CheckGroundCollisions(bool synced)
 		//   don't add p->radius to groundHeight, or most (esp. modelled)
 		//   projectiles will collide with the ground one or more frames
 		//   too early
-		const float px = p->pos.x;
-		const float py = p->pos.y;
-		const float pz = p->pos.z;
+		const float& px = p->pos.x;
+		const float& py = p->pos.y;
+		const float& pz = p->pos.z;
+
 		const float gy = CGround::GetHeightReal(px, pz);
 
 		const bool belowGround = (py < gy);
@@ -619,11 +623,18 @@ void CProjectileHandler::CheckGroundCollisions(bool synced)
 		if (!belowGround && (!insideWater || p->ignoreWater))
 			continue;
 
-		// if position has dropped below terrain or into water
-		// where we can not live, adjust it and explode us now
-		// (if the projectile does not set deleteMe = true, it
-		// will keep hugging the terrain)
-		p->SetPosition((p->pos * XZVector) + (UpVector * mix(py, gy, belowGround)));
+		if likely(belowGround) {
+			//ZoneScopedN("CheckGroundCollisions::BG");
+			if likely(p->speed.w > 0 && !p->blockPreciseCol) {
+				const auto& prePos = p->preFrameTra.t;
+				const auto groundDistance = std::clamp(CGround::LineGroundCol(prePos, p->pos, synced), 0.0f, p->speed.w);
+				p->SetPosition(prePos + static_cast<float3>(p->speed) * groundDistance / p->speed.w);
+			}
+			else {
+				p->pos.y = gy;
+			}
+		}
+
 		p->Collision();
 	}
 }

@@ -55,12 +55,12 @@ public:
 
 	CglFont(const std::string& fontFile, int size, int outlinewidth, float outlineweight);
 
-	void Begin();
+	void Begin(bool userDefinedBlending = false);
 	void End();
 
-	void DrawBuffered();
+	void DrawBuffered(bool userDefinedBlending = false);
 
-	void DrawWorldBuffered();
+	void DrawWorldBuffered(bool userDefinedBlending = false);
 
 	void glWorldPrint(const float3& p, const float size, const std::string& str, int options = FONT_DESCENDER | FONT_CENTER | FONT_OUTLINE | FONT_BUFFERED);
 
@@ -106,10 +106,6 @@ public:
 	const std::string& GetFilePath() const { return fontPath; }
 
 	void GetStats(std::array<size_t, 8>& stats) const;
-
-	static constexpr char8_t ColorCodeIndicator   = 0xFF;
-	static constexpr char8_t ColorCodeIndicatorEx = 0xFE;
-	static constexpr char8_t ColorResetIndicator  = 0x08; // =: '\\b'
 private:
 	static const float4* ChooseOutlineColor(const float4& textColor);
 
@@ -131,10 +127,10 @@ private:
 		int& numLines
 	);
 private:
-	void ScanForWantedGlyphs(const spring::u8string& str);
 	float GetTextWidth_(const spring::u8string& text);
 	float GetTextHeight_(const spring::u8string& text, float* descender = nullptr, int* numLines = nullptr);
 public:
+	void ScanForWantedGlyphs(const spring::u8string& str) override;
 	static auto GetLoadedFonts() -> const decltype(allFonts)& {
 		return allFonts;
 	}
@@ -169,7 +165,6 @@ private:
 
 extern std::shared_ptr<CglFont> font;
 extern std::shared_ptr<CglFont> smallFont;
-
 
 // wrappers
 float CglFont::GetTextWidth(const std::string& text)

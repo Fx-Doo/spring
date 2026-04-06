@@ -1,6 +1,7 @@
 /* This file is part of the Spring engine (GPL v2 or later), see LICENSE.html */
 
 #include "LuaHandle.h"
+#include "lua_privileges.h"
 
 #include "LuaGaia.h"
 #include "LuaRules.h"
@@ -10,17 +11,19 @@
 #include "LuaConfig.h"
 #include "LuaHashString.h"
 #include "LuaOpenGL.h"
-#include "LuaBitOps.h"
+#include "LuaEncoding.h"
 #include "LuaMathExtra.h"
 #include "LuaTableExtra.h"
 #include "LuaTracyExtra.h"
 #include "LuaUtils.h"
 #include "LuaZip.h"
 #include "Game/Game.h"
+#include "Game/GameHelper.h"
 #include "Game/Action.h"
 #include "Game/GlobalUnsynced.h"
 #include "Game/Players/Player.h"
 #include "Game/Players/PlayerHandler.h"
+#include "Sim/Misc/LosHandler.h"
 #include "Net/Protocol/NetProtocol.h"
 #include "Game/UI/KeySet.h"
 #include "Game/UI/MiniMap.h"
@@ -28,9 +31,12 @@
 #include "Rml/Backends/RmlUi_Backend.h"
 #include "Sim/Misc/GlobalSynced.h"
 #include "Sim/Misc/TeamHandler.h"
+#include "Sim/Projectiles/ExplosionGenerator.h"
 #include "Sim/Projectiles/Projectile.h"
 #include "Sim/Projectiles/WeaponProjectiles/WeaponProjectile.h"
 #include "Sim/Features/FeatureDef.h"
+#include "Sim/Units/Scripts/CobDeferredCallin.h"
+#include "Sim/Units/Scripts/CobInstance.h" // for UNPACK{X,Z}
 #include "Sim/Units/Unit.h"
 #include "Sim/Units/UnitDef.h"
 #include "Sim/Weapons/Weapon.h"
@@ -46,6 +52,7 @@
 #include "System/Log/ILog.h"
 #include "System/Input/KeyInput.h"
 #include "System/Platform/SDL1_keysym.h"
+
 
 #include "LuaInclude.h"
 
@@ -70,26 +77,40 @@ const  spring::unsynced_set<const luaContextData*>*          LUAHANDLE_CONTEXTS[
 
 bool CLuaHandle::devMode = false;
 
-/******************************************************************************
- * Callins, functions called by the Engine
+const int* CLuaHandle::currentCobArgs = nullptr;
+
+/***
+ * @class Callins
+ * 
+ * Functions called by the Engine.
  *
+ * To use these callins in a widget, prepend `widget:` and, for a gadget,
+ * prepend `gadget:`. For example:
  *
- * This page is future looking to unified widget/gadget (aka "addon") handler, which may yet be some way off, c.f. the changelog.
+ * ```lua
+ * function widget:UnitCreated(unitID, unitDefID, unitTeam, builderID)
+ *   -- ...
+ * end
+ * ```
  *
- * Related Sourcecode: [LuaHandle.cpp](https://github.com/beyond-all-reason/spring/blob/BAR105/rts/Lua/LuaHandle.cpp)
- *
- * For now, to use these addons in a widget, prepend widget: and, for a gadget, prepend gadget:. For example,
- *
- *    function widget:UnitCreated(unitID, unitDefID, unitTeam, builderID)
- *        ...
- *    end
- *
- * Some functions may differ between (synced) gadget and widgets; those are in the [Synced - Unsynced Shared](#Synced___Unsynced_Shared) section. Essentially the reason is that all information should be available to synced (game logic controlling) gadgets, but restricted to unsynced gadget/widget (e.g. information about an enemy unit only detected via radar and not yet in LOS). In such cases the full (synced) param list is documented.
- *
- * Attention: some callins will only work on the unsynced portion of the gadget. Due to the type-unsafe nature of lua parsing, those callins not firing up might be hard to trace. This document will be continuously updated to properly alert about those situations.
- *
- * @see rts/Lua/LuaHandle.cpp
-******************************************************************************/
+ * Some functions may differ between (synced) gadget and widgets. This is
+ * because all information should be available to synced (game logic
+ * controlling) gadgets, but restricted to unsynced gadget/widget. e.g.
+ * information about an enemy unit only detected via radar and not yet in LOS.
+ * 
+ * In such cases the full (synced) param list is documented.
+ * 
+ * **Attention:** Some callins will only work on the unsynced portion of the gadget.
+ * Due to the type-unsafe nature of lua parsing, those callins not firing up
+ * might be hard to trace.
+ * 
+ * @see Gadget
+ * @see Widget
+ * @see Menu
+ * @see Intro
+ * @see SyncedCallins
+ * @see UnsyncedCallins
+ */
 
 void CLuaHandle::PushTracebackFuncToRegistry(lua_State* L)
 {
@@ -134,6 +155,8 @@ CLuaHandle::CLuaHandle(const string& _name, int _order, bool _userMode, bool _sy
 	D.gcCtrl.baseMemLoadMult = configHandler->GetFloat("LuaGarbageCollectionMemLoadMult");
 	D.gcCtrl.baseRunTimeMult = configHandler->GetFloat("LuaGarbageCollectionRunTimeMult");
 
+	currentCobArgs = nullptr;
+
 	L = LUA_OPEN(&D);
 	L_GC = lua_newthread(L);
 
@@ -160,6 +183,9 @@ CLuaHandle::CLuaHandle(const string& _name, int _order, bool _userMode, bool _sy
 CLuaHandle::~CLuaHandle()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
+
+	currentCobArgs = nullptr;
+
 	// KillLua() must be called before us!
 	assert(!IsValid());
 	assert(!eventHandler.HasClient(this));
@@ -198,6 +224,10 @@ void CLuaHandle::KillLua(bool inFreeHandler)
 /******************************************************************************/
 /******************************************************************************/
 
+/***
+ * @function Script.Kill
+ * @param killMessage string? Kill message.
+ */
 int CLuaHandle::KillActiveHandle(lua_State* L)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -490,12 +520,12 @@ bool CLuaHandle::RunCallInTraceback(lua_State* L, const LuaHashString& hs, int i
 
 /*** Called when the addon is (re)loaded.
  *
- * @function Initialize
+ * @function Callins:Initialize
  */
 
 /*** Called when the game is (re)loaded.
  *
- * @function LoadCode
+ * @function Callins:LoadCode
  */
 bool CLuaHandle::LoadCode(lua_State* L, std::string code, const string& debug)
 {
@@ -519,9 +549,38 @@ bool CLuaHandle::LoadCode(lua_State* L, std::string code, const string& debug)
 }
 
 
+int CLuaHandle::LoadStringData(lua_State* L)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	size_t len;
+	const char *str    = luaL_checklstring(L, 1, &len);
+	const char *chunkname = luaL_optstring(L, 2, str);
+
+	auto handle = GetHandle(L);
+
+	if (luaL_loadbuffer_privileged(L, str, len, chunkname, handle->GetDevMode()) != 0) {
+		lua_pushnil(L);
+		lua_insert(L, -2);
+		return 2; // nil, then the error message
+	}
+
+	// set the chunk's fenv to the current fenv
+	if (lua_istable(L, 3)) {
+		lua_pushvalue(L, 3);
+	} else {
+		LuaUtils::PushCurrentFuncEnv(L, __func__);
+	}
+
+	if (lua_setfenv(L, -2) == 0)
+		luaL_error(L, "[%s] error with setfenv", __func__);
+
+	return 1;
+}
+
+
 /*** Called when the addon or the game is shutdown.
  *
- * @function Shutdown
+ * @function Callins:Shutdown
  * @return nil
  */
 void CLuaHandle::Shutdown()
@@ -543,9 +602,9 @@ void CLuaHandle::Shutdown()
 
 /*** Called when a player issues a UI command e.g. types /foo or /luarules foo.
  *
- * @function GotChatMsg
+ * @function Callins:GotChatMsg
  * @param msg string
- * @param playerID number
+ * @param playerID integer
  */
 bool CLuaHandle::GotChatMsg(const string& msg, int playerID)
 {
@@ -575,7 +634,7 @@ bool CLuaHandle::GotChatMsg(const string& msg, int playerID)
 
 /*** Called after `GamePreload` and before `GameStart`. See Lua_SaveLoad.
  *
- * @function Load
+ * @function Callins:Load
  * @param zipReader table
  */
 void CLuaHandle::Load(IArchive* archive)
@@ -621,6 +680,10 @@ bool CLuaHandle::HasCallIn(lua_State* L, const string& name) const
 }
 
 
+/***
+ * @function Script.UpdateCallin
+ * @param name string
+ */
 bool CLuaHandle::UpdateCallIn(lua_State* L, const string& name)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -640,7 +703,7 @@ bool CLuaHandle::UpdateCallIn(lua_State* L, const string& name)
  *
  * Is not called when a saved game is loaded.
  *
- * @function GamePreload
+ * @function Callins:GamePreload
  */
 void CLuaHandle::GamePreload()
 {
@@ -661,7 +724,7 @@ void CLuaHandle::GamePreload()
 
 /*** Called upon the start of the game.
  *
- * @function GameStart
+ * @function Callins:GameStart
  *
  * Is not called when a saved game is loaded.
  */
@@ -684,7 +747,7 @@ void CLuaHandle::GameStart()
 
 /*** Called when the game ends
  *
- * @function GameOver
+ * @function Callins:GameOver
  * @param winningAllyTeams number[] list of winning allyTeams, if empty the game result was undecided (like when dropping from an host).
  */
 void CLuaHandle::GameOver(const std::vector<unsigned char>& winningAllyTeams)
@@ -711,8 +774,8 @@ void CLuaHandle::GameOver(const std::vector<unsigned char>& winningAllyTeams)
 
 /*** Called when the game is paused.
  *
- * @function GamePaused
- * @param playerID number
+ * @function Callins:GamePaused
+ * @param playerID integer
  * @param paused boolean
  */
 void CLuaHandle::GamePaused(int playerID, bool paused)
@@ -761,7 +824,7 @@ void CLuaHandle::RunDelayedFunctions(int frameNum)
 
 /*** Called for every game simulation frame (30 per second).
  *
- * @function GameFrame
+ * @function Callins:GameFrame
  * @param frame number Starts at frame 1
  */
 void CLuaHandle::GameFrame(int frameNum)
@@ -795,7 +858,7 @@ void CLuaHandle::GameFrame(int frameNum)
 
 /*** Called at the end of every game simulation frame
  *
- * @function GameFramePost
+ * @function Callins:GameFramePost
  * @param frame number Starts at frame 1
  */
 void CLuaHandle::GameFramePost(int frameNum)
@@ -819,7 +882,7 @@ void CLuaHandle::GameFramePost(int frameNum)
 
 /*** Called once to deliver the gameID
  *
- * @function GameID
+ * @function Callins:GameID
  * @param gameID string encoded in hex.
  */
 void CLuaHandle::GameID(const unsigned char* gameID, unsigned int numBytes)
@@ -850,8 +913,8 @@ void CLuaHandle::GameID(const unsigned char* gameID, unsigned int numBytes)
 
 /*** Called when a team dies (see `Spring.KillTeam`).
  *
- * @function TeamDied
- * @param teamID number
+ * @function Callins:TeamDied
+ * @param teamID integer
  */
 void CLuaHandle::TeamDied(int teamID)
 {
@@ -872,9 +935,9 @@ void CLuaHandle::TeamDied(int teamID)
 }
 
 
-/*** @function TeamChanged
+/*** @function Callins:TeamChanged
  *
- * @param teamID number
+ * @param teamID integer
  */
 void CLuaHandle::TeamChanged(int teamID)
 {
@@ -897,8 +960,8 @@ void CLuaHandle::TeamChanged(int teamID)
 
 /*** Called whenever a player's status changes e.g. becoming a spectator.
  *
- * @function PlayerChanged
- * @param playerID number
+ * @function Callins:PlayerChanged
+ * @param playerID integer
  */
 void CLuaHandle::PlayerChanged(int playerID)
 {
@@ -921,8 +984,8 @@ void CLuaHandle::PlayerChanged(int playerID)
 
 /*** Called whenever a new player joins the game.
  *
- * @function PlayerAdded
- * @param playerID number
+ * @function Callins:PlayerAdded
+ * @param playerID integer
  */
 void CLuaHandle::PlayerAdded(int playerID)
 {
@@ -945,8 +1008,8 @@ void CLuaHandle::PlayerAdded(int playerID)
 
 /*** Called whenever a player is removed from the game.
  *
- * @function PlayerRemoved
- * @param playerID number
+ * @function Callins:PlayerRemoved
+ * @param playerID integer
  * @param reason string
  */
 void CLuaHandle::PlayerRemoved(int playerID, int reason)
@@ -995,11 +1058,11 @@ inline void CLuaHandle::UnitCallIn(const LuaHashString& hs, const CUnit* unit)
 
 /*** Called at the moment the unit is created.
  *
- * @function UnitCreated
+ * @function Callins:UnitCreated
  * @param unitID integer
  * @param unitDefID integer
  * @param unitTeam integer
- * @param builderID number?
+ * @param builderID integer?
  */
 void CLuaHandle::UnitCreated(const CUnit* unit, const CUnit* builder)
 {
@@ -1026,7 +1089,7 @@ void CLuaHandle::UnitCreated(const CUnit* unit, const CUnit* builder)
 
 /*** Called at the moment the unit is completed.
  *
- * @function UnitFinished
+ * @function Callins:UnitFinished
  * @param unitID integer
  * @param unitDefID integer
  * @param unitTeam integer
@@ -1040,12 +1103,12 @@ void CLuaHandle::UnitFinished(const CUnit* unit)
 
 /*** Called when a factory finishes construction of a unit.
  *
- * @function UnitFromFactory
+ * @function Callins:UnitFromFactory
  * @param unitID integer
  * @param unitDefID integer
  * @param unitTeam integer
- * @param factID number
- * @param factDefID number
+ * @param factID integer
+ * @param factDefID integer
  * @param userOrders boolean
  */
 void CLuaHandle::UnitFromFactory(const CUnit* unit,
@@ -1074,7 +1137,7 @@ void CLuaHandle::UnitFromFactory(const CUnit* unit,
 
 /*** Called when a living unit becomes a nanoframe again.
  *
- * @function UnitReverseBuilt
+ * @function Callins:UnitReverseBuilt
  * @param unitID integer
  * @param unitDefID integer
  * @param unitTeam integer
@@ -1089,7 +1152,7 @@ void CLuaHandle::UnitReverseBuilt(const CUnit* unit)
 
 /*** Called when a unit being built starts decaying.
  *
- * @function UnitConstructionDecayed
+ * @function Callins:UnitConstructionDecayed
  * @param unitID integer
  * @param unitDefID integer
  * @param unitTeam integer
@@ -1122,14 +1185,14 @@ void CLuaHandle::UnitConstructionDecayed(const CUnit* unit, float timeSinceLastB
 
 /*** Called when a unit is destroyed.
  *
- * @function UnitDestroyed
+ * @function Callins:UnitDestroyed
  * @param unitID integer
  * @param unitDefID integer
  * @param unitTeam integer
- * @param attackerID number
- * @param attackerDefID number
+ * @param attackerID integer
+ * @param attackerDefID integer
  * @param attackerTeam number
- * @param weaponDefID number
+ * @param weaponDefID integer
  */
 void CLuaHandle::UnitDestroyed(const CUnit* unit, const CUnit* attacker, int weaponDefID)
 {
@@ -1160,7 +1223,7 @@ void CLuaHandle::UnitDestroyed(const CUnit* unit, const CUnit* attacker, int wea
 
 /*** Called when a unit is transferred between teams. This is called before `UnitGiven` and in that moment unit is still assigned to the oldTeam.
  *
- * @function UnitTaken
+ * @function Callins:UnitTaken
  * @param unitID integer
  * @param unitDefID integer
  * @param oldTeam number
@@ -1189,7 +1252,7 @@ void CLuaHandle::UnitTaken(const CUnit* unit, int oldTeam, int newTeam)
 
 /*** Called when a unit is transferred between teams. This is called after `UnitTaken` and in that moment unit is assigned to the newTeam.
  *
- * @function UnitGiven
+ * @function Callins:UnitGiven
  * @param unitID integer
  * @param unitDefID integer
  * @param newTeam number
@@ -1218,7 +1281,7 @@ void CLuaHandle::UnitGiven(const CUnit* unit, int oldTeam, int newTeam)
 
 /*** Called when a unit is idle (empty command queue).
  *
- * @function UnitIdle
+ * @function Callins:UnitIdle
  * @param unitID integer
  * @param unitDefID integer
  * @param unitTeam integer
@@ -1232,11 +1295,11 @@ void CLuaHandle::UnitIdle(const CUnit* unit)
 
 /*** Called after when a unit accepts a command, after `AllowCommand` returns true.
  *
- * @function UnitCommand
+ * @function Callins:UnitCommand
  * @param unitID integer
  * @param unitDefID integer
  * @param unitTeam integer
- * @param cmdID number
+ * @param cmdID integer
  * @param cmdParams table
  * @param options CommandOptions
  * @param cmdTag number
@@ -1266,11 +1329,11 @@ void CLuaHandle::UnitCommand(const CUnit* unit, const Command& command, int play
 
 /*** Called when a unit completes a command.
  *
- * @function UnitCmdDone
+ * @function Callins:UnitCmdDone
  * @param unitID integer
  * @param unitDefID integer
  * @param unitTeam integer
- * @param cmdID number
+ * @param cmdID integer
  * @param cmdParams table
  * @param options CommandOptions
  * @param cmdTag number
@@ -1296,16 +1359,16 @@ void CLuaHandle::UnitCmdDone(const CUnit* unit, const Command& command)
 
 /*** Called when a unit is damaged (after UnitPreDamaged).
  *
- * @function UnitDamaged
+ * @function Callins:UnitDamaged
  * @param unitID integer
  * @param unitDefID integer
  * @param unitTeam integer
  * @param damage number
  * @param paralyzer number
- * @param weaponDefID number
- * @param projectileID number
- * @param attackerID number
- * @param attackerDefID number
+ * @param weaponDefID integer
+ * @param projectileID integer
+ * @param attackerID integer
+ * @param attackerDefID integer
  * @param attackerTeam number
  */
 void CLuaHandle::UnitDamaged(
@@ -1344,7 +1407,7 @@ void CLuaHandle::UnitDamaged(
 
 /*** Called when a unit changes its stun status.
  *
- * @function UnitStunned
+ * @function Callins:UnitStunned
  * @param unitID integer
  * @param unitDefID integer
  * @param unitTeam integer
@@ -1378,7 +1441,7 @@ void CLuaHandle::UnitStunned(
  *
  * Should be called more reliably with small values of experience grade.
  *
- * @function UnitExperience
+ * @function Callins:UnitExperience
  *
  * @param unitID integer
  * @param unitDefID integer
@@ -1411,7 +1474,7 @@ void CLuaHandle::UnitExperience(const CUnit* unit, float oldExperience)
 
 /*** Called when a unit's harvestStorage is full (according to its unitDef's entry).
  *
- * @function UnitHarvestStorageFull
+ * @function Callins:UnitHarvestStorageFull
  * @param unitID integer
  * @param unitDefID integer
  * @param unitTeam integer
@@ -1427,7 +1490,7 @@ void CLuaHandle::UnitHarvestStorageFull(const CUnit* unit)
 
 /*** Called when a unit emits a seismic ping.
  *
- * @function UnitSeismicPing
+ * @function Callins:UnitSeismicPing
  *
  * See `seismicSignature`.
  *
@@ -1497,7 +1560,7 @@ void CLuaHandle::LosCallIn(const LuaHashString& hs,
  *
  * Also called when a unit enters LOS without any radar coverage.
  *
- * @function UnitEnteredRadar
+ * @function Callins:UnitEnteredRadar
  * @param unitID integer
  * @param unitTeam integer
  * @param allyTeam integer
@@ -1516,7 +1579,7 @@ void CLuaHandle::UnitEnteredRadar(const CUnit* unit, int allyTeam)
  *
  * Its called after the unit is in LOS, so you can query that unit.
  *
- * @function UnitEnteredLos
+ * @function Callins:UnitEnteredLos
  * @param unitID integer
  * @param unitTeam integer
  * @param allyTeam integer who's LOS the unit entered.
@@ -1536,7 +1599,7 @@ void CLuaHandle::UnitEnteredLos(const CUnit* unit, int allyTeam)
  * For widgets, this is called just after a unit leaves radar coverage, so
  * widgets cannot get the position of units that left their radar.
  *
- * @function UnitLeftRadar
+ * @function Callins:UnitLeftRadar
  * @param unitID integer
  * @param unitTeam integer
  * @param allyTeam integer
@@ -1555,7 +1618,7 @@ void CLuaHandle::UnitLeftRadar(const CUnit* unit, int allyTeam)
  *
  * For widgets, this one is called just before the unit leaves los, so you can still get the position of a unit that left los.
  *
- * @function UnitLeftLos
+ * @function Callins:UnitLeftLos
  * @param unitID integer
  * @param unitTeam integer
  * @param allyTeam integer
@@ -1576,7 +1639,7 @@ void CLuaHandle::UnitLeftLos(const CUnit* unit, int allyTeam)
 
 /*** Called when a unit is loaded by a transport.
  *
- * @function UnitLoaded
+ * @function Callins:UnitLoaded
  * @param unitID integer
  * @param unitDefID integer
  * @param unitTeam integer
@@ -1606,9 +1669,9 @@ void CLuaHandle::UnitLoaded(const CUnit* unit, const CUnit* transport)
 }
 
 
-/***Called when a unit is unloaded by a transport.
+/*** Called when a unit is unloaded by a transport.
  *
- * @function UnitUnloaded
+ * @function Callins:UnitUnloaded
  * @param unitID integer
  * @param unitDefID integer
  * @param unitTeam integer
@@ -1646,7 +1709,7 @@ void CLuaHandle::UnitUnloaded(const CUnit* unit, const CUnit* transport)
 
 /***
  *
- * @function UnitEnteredUnderwater
+ * @function Callins:UnitEnteredUnderwater
  * @param unitID integer
  * @param unitDefID integer
  * @param unitTeam integer
@@ -1660,7 +1723,7 @@ void CLuaHandle::UnitEnteredUnderwater(const CUnit* unit)
 
 /***
  *
- * @function UnitEnteredWater
+ * @function Callins:UnitEnteredWater
  * @param unitID integer
  * @param unitDefID integer
  * @param unitTeam integer
@@ -1674,7 +1737,7 @@ void CLuaHandle::UnitEnteredWater(const CUnit* unit)
 
 /***
  *
- * @function UnitLeftAir
+ * @function Callins:UnitLeftAir
  *
  * @param unitID integer
  * @param unitDefID integer
@@ -1689,7 +1752,7 @@ void CLuaHandle::UnitEnteredAir(const CUnit* unit)
 
 /***
  *
- * @function UnitLeftUnderwater
+ * @function Callins:UnitLeftUnderwater
  *
  * @param unitID integer
  * @param unitDefID integer
@@ -1703,7 +1766,7 @@ void CLuaHandle::UnitLeftUnderwater(const CUnit* unit)
 
 /***
  *
- * @function UnitLeftWater
+ * @function Callins:UnitLeftWater
  *
  * @param unitID integer
  * @param unitDefID integer
@@ -1718,7 +1781,7 @@ void CLuaHandle::UnitLeftWater(const CUnit* unit)
 
 /***
  *
- * @function UnitEnteredAir
+ * @function Callins:UnitEnteredAir
  *
  * @param unitID integer
  * @param unitDefID integer
@@ -1733,7 +1796,7 @@ void CLuaHandle::UnitLeftAir(const CUnit* unit)
 
 /*** Called when a unit cloaks.
  *
- * @function UnitCloaked
+ * @function Callins:UnitCloaked
  *
  * @param unitID integer
  * @param unitDefID integer
@@ -1748,7 +1811,7 @@ void CLuaHandle::UnitCloaked(const CUnit* unit)
 
 /*** Called when a unit decloaks.
  *
- * @function UnitDecloaked
+ * @function Callins:UnitDecloaked
  *
  * @param unitID integer
  * @param unitDefID integer
@@ -1765,9 +1828,9 @@ void CLuaHandle::UnitDecloaked(const CUnit* unit)
  *
  * Both units must be registered with `Script.SetWatchUnit`.
  *
- * @function UnitUnitCollision
- * @param colliderID number
- * @param collideeID number
+ * @function Callins:UnitUnitCollision
+ * @param colliderID integer
+ * @param collideeID integer
  */
 bool CLuaHandle::UnitUnitCollision(const CUnit* collider, const CUnit* collidee)
 {
@@ -1814,12 +1877,12 @@ bool CLuaHandle::UnitUnitCollision(const CUnit* collider, const CUnit* collidee)
 
 /*** Called when a unit collides with a feature.
  *
- * @function UnitFeatureCollision
+ * @function Callins:UnitFeatureCollision
  *
  * The unit must be registered with `Script.SetWatchUnit` and the feature registered with `Script.SetWatchFeature`.
  *
- * @param colliderID number
- * @param collideeID number
+ * @param colliderID integer
+ * @param collideeID integer
  */
 bool CLuaHandle::UnitFeatureCollision(const CUnit* collider, const CFeature* collidee)
 {
@@ -1867,7 +1930,7 @@ bool CLuaHandle::UnitFeatureCollision(const CUnit* collider, const CFeature* col
 
 /***
  *
- * @function UnitMoveFailed
+ * @function Callins:UnitMoveFailed
  *
  * @param unitID integer
  * @param unitDefID integer
@@ -1889,7 +1952,7 @@ void CLuaHandle::UnitMoveFailed(const CUnit* unit)
 
 /***
  *
- * @function UnitArrivedAtGoal
+ * @function Callins:UnitArrivedAtGoal
  *
  * @param unitID integer
  * @param unitDefID integer
@@ -1906,7 +1969,7 @@ void CLuaHandle::UnitArrivedAtGoal(const CUnit* unit)
 
 /*** Called just before a unit is invalid, after it finishes its death animation.
  *
- * @function RenderUnitDestroyed
+ * @function Callins:RenderUnitDestroyed
  *
  * @param unitID integer
  * @param unitDefID integer
@@ -1944,10 +2007,10 @@ void CLuaHandle::RenderUnitDestroyed(const CUnit* unit)
 
 /*** Called when a feature is created.
  *
- * @function FeatureCreated
+ * @function Callins:FeatureCreated
  *
- * @param featureID number
- * @param allyTeamID number
+ * @param featureID integer
+ * @param allyTeamID integer
  */
 void CLuaHandle::FeatureCreated(const CFeature* feature)
 {
@@ -1971,10 +2034,10 @@ void CLuaHandle::FeatureCreated(const CFeature* feature)
 
 /*** Called when a feature is destroyed.
  *
- * @function FeatureDestroyed
+ * @function Callins:FeatureDestroyed
  *
- * @param featureID number
- * @param allyTeamID number
+ * @param featureID integer
+ * @param allyTeamID integer
  */
 void CLuaHandle::FeatureDestroyed(const CFeature* feature)
 {
@@ -1998,16 +2061,16 @@ void CLuaHandle::FeatureDestroyed(const CFeature* feature)
 
 /*** Called when a feature is damaged.
  *
- * @function FeatureDamaged
+ * @function Callins:FeatureDamaged
  *
- * @param featureID number
- * @param featureDefID number
+ * @param featureID integer
+ * @param featureDefID integer
  * @param featureTeam number
  * @param damage number
- * @param weaponDefID number
- * @param projectileID number
- * @param attackerID number
- * @param attackerDefID number
+ * @param weaponDefID integer
+ * @param projectileID integer
+ * @param attackerID integer
+ * @param attackerDefID integer
  * @param attackerTeam number
  */
 void CLuaHandle::FeatureDamaged(
@@ -2047,19 +2110,22 @@ void CLuaHandle::FeatureDamaged(
  * Projectiles
  * @section projectiles
  *
- * The following Callins are only called for weaponDefIDs registered via Script.SetWatchWeapon.
+ * The following Callins are only called for weaponDefIDs registered
+ * via Script.SetWatchWeapon or Script.SetWatchProjectile.
 ******************************************************************************/
 
 /*** Called when the projectile is created.
  *
- * @function ProjectileCreated
+ * @function Callins:ProjectileCreated
  *
  * Note that weaponDefID is missing if the projectile is spawned as part of a burst, but `Spring.GetProjectileDefID` and `Spring.GetProjectileName` still work in callin scope using proID.
  *
- * @param proID number
- * @param proOwnerID number
- * @param weaponDefID number
+ * @param proID integer
+ * @param proOwnerID integer
+ * @param weaponDefID integer
  *
+ * @see Script.SetWatchProjectile
+ * @see Script.SetWatchWeapon
  */
 void CLuaHandle::ProjectileCreated(const CProjectile* p)
 {
@@ -2102,10 +2168,13 @@ void CLuaHandle::ProjectileCreated(const CProjectile* p)
 
 /*** Called when the projectile is destroyed.
  *
- * @function ProjectileDestroyed
- * @param proID number
- * @param ownerID number
- * @param proWeaponDefID number
+ * @function Callins:ProjectileDestroyed
+ * @param proID integer
+ * @param ownerID integer
+ * @param proWeaponDefID integer
+ *
+ * @see Script.SetWatchProjectile
+ * @see Script.SetWatchWeapon
  */
 void CLuaHandle::ProjectileDestroyed(const CProjectile* p)
 {
@@ -2153,19 +2222,35 @@ void CLuaHandle::ProjectileDestroyed(const CProjectile* p)
 
 /******************************************************************************/
 
+/***
+ * Helper to get Explosion visibility.
+ */
+
+bool CLuaHandle::IsExplosionVisible(const WeaponDef* weaponDef, const CExplosionParams& params)
+{
+	const int allyTeamID = CLuaHandle::GetHandleReadAllyTeam(L);
+	return explGenHandler.PredictExplosionVisible(weaponDef, params, allyTeamID);
+}
+
 /*** Called when an explosion occurs.
  *
- * @function Explosion
+ * @function Callins:Explosion
  *
- * @param weaponDefID number
+ * Only called for weaponDefIDs registered via Script.SetWatchExplosion or Script.SetWatchWeapon.
+ *
+ * @param weaponDefID integer
  * @param px number
  * @param py number
  * @param pz number
- * @param attackerID number
- * @param projectileID number
+ * @param attackerID integer
+ * @param projectileID integer
+  *
  * @return boolean noGfx if then no graphical effects are drawn by the engine for this explosion.
+ *
+ * @see Script.SetWatchExplosion
+ * @see Script.SetWatchWeapon
  */
-bool CLuaHandle::Explosion(int weaponDefID, int projectileID, const float3& pos, const CUnit* owner)
+bool CLuaHandle::Explosion(int weaponDefID, const WeaponDef* weaponDef, const CExplosionParams& params)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	// piece-projectile collision (*ALL* other
@@ -2173,10 +2258,15 @@ bool CLuaHandle::Explosion(int weaponDefID, int projectileID, const float3& pos,
 	if (weaponDefID < 0)
 		return false;
 
-	// if empty, we are not a LuaHandleSynced
+	// if empty, we are a handle with no explosion watch support.
 	if (watchExplosionDefs.empty())
 		return false;
 	if (!watchExplosionDefs[weaponDefID])
+		return false;
+
+	bool synced = GetHandleSynced(L);
+
+	if (!synced && !IsExplosionVisible(weaponDef, params))
 		return false;
 
 	LUA_CALL_IN_CHECK(L, false);
@@ -2187,15 +2277,15 @@ bool CLuaHandle::Explosion(int weaponDefID, int projectileID, const float3& pos,
 		return false;
 
 	lua_pushnumber(L, weaponDefID);
-	lua_pushnumber(L, pos.x);
-	lua_pushnumber(L, pos.y);
-	lua_pushnumber(L, pos.z);
-	if (owner != nullptr) {
-		lua_pushnumber(L, owner->id);
+	lua_pushnumber(L, params.pos.x);
+	lua_pushnumber(L, params.pos.y);
+	lua_pushnumber(L, params.pos.z);
+	if (params.owner != nullptr) {
+		lua_pushnumber(L, params.owner->id);
 	} else {
 		lua_pushnil(L); // for backward compatibility
 	}
-	lua_pushnumber(L, projectileID);
+	lua_pushnumber(L, params.projectileID);
 
 	// call the routine
 	if (!RunCallIn(L, cmdStr, 6, 1))
@@ -2204,13 +2294,13 @@ bool CLuaHandle::Explosion(int weaponDefID, int projectileID, const float3& pos,
 	// get the results
 	const bool retval = luaL_optboolean(L, -1, false);
 	lua_pop(L, 1);
-	return retval;
+	return synced && retval;
 }
 
 
 /*** Called when a units stockpile of weapons increases or decreases.
  *
- * @function StockpileChanged
+ * @function Callins:StockpileChanged
  *
  * @param unitID integer
  * @param unitDefID integer
@@ -2245,9 +2335,9 @@ void CLuaHandle::StockpileChanged(const CUnit* unit,
 
 /*** Receives messages from unsynced sent via `Spring.SendLuaRulesMsg` or `Spring.SendLuaUIMsg`.
  *
- * @function RecvLuaMsg
+ * @function Callins:RecvLuaMsg
  * @param msg string
- * @param playerID number
+ * @param playerID integer
  */
 bool CLuaHandle::RecvLuaMsg(const string& msg, int playerID)
 {
@@ -2273,6 +2363,61 @@ bool CLuaHandle::RecvLuaMsg(const string& msg, int playerID)
 
 
 /******************************************************************************/
+
+void CLuaHandle::SetDevMode(bool value)
+{
+	if (value == devMode)
+		return;
+
+	devMode = value;
+
+	for (const auto* lcd : LUAHANDLE_CONTEXTS) {
+		for (const auto* lc : *lcd) {
+			if (!lc || !lc->owner)
+				continue;
+
+			lc->owner->EnactDevMode();
+		}
+	}
+}
+
+
+/* Toggles between empty table and filling it with lua module functions. 
+ */
+void CLuaHandle::SwapEnableModule(lua_State* L, bool enabled, const char* moduleName, lua_CFunction func) const
+{
+	// check if module table already exists
+	lua_getglobal(L, moduleName);
+	const bool missing = lua_isnil(L, -1);
+	lua_pop(L, 1);
+
+	// create an empty module table
+	if (missing) {
+		lua_createtable(L, 0, 0);
+		lua_setglobal(L, moduleName);
+	}
+
+	if (enabled) {
+		// relink methods
+		lua_pushvalue(L, LUA_GLOBALSINDEX);
+		LUA_OPEN_LIB(L, func);
+		lua_pop(L, 1);
+	}
+	else {
+		// unlink all methods
+		lua_getglobal(L, moduleName);
+		lua_pushnil(L);
+		while (lua_next(L, -2))
+		{
+			lua_pop(L, 1);		// pop value
+			lua_pushnil(L);
+			lua_rawset(L, -3);	// pop new value and key
+			lua_pushnil(L);		// restart iteration
+		}
+		lua_pop(L, 1);
+	}
+}
+
 
 void CLuaHandle::HandleLuaMsg(int playerID, int script, int mode, const std::vector<std::uint8_t>& data)
 {
@@ -2326,7 +2471,7 @@ void CLuaHandle::HandleLuaMsg(int playerID, int script, int mode, const std::vec
 
 /*** Called when a chat command '/save' or '/savegame' is received.
  *
- * @function Save
+ * @function Callins:Save
  * @param zip table a userdatum representing the savegame zip file. See Lua_SaveLoad.
  */
 void CLuaHandle::Save(zipFile archive)
@@ -2352,7 +2497,7 @@ void CLuaHandle::Save(zipFile archive)
 
 /*** Called when the unsynced copy of the height-map is altered.
  *
- * @function UnsyncedHeightMapUpdate
+ * @function Callins:UnsyncedHeightMapUpdate
  * @return number x1
  * @return number z1
  * @return number x2
@@ -2379,7 +2524,7 @@ void CLuaHandle::UnsyncedHeightMapUpdate(const SRectangle& rect)
 
 /*** Called for every draw frame (including when the game is paused) and at least once per sim frame except when catching up.
  *
- * @function Update
+ * @function Callins:Update
  * @param dt number the time since the last update.
  */
 void CLuaHandle::Update()
@@ -2391,14 +2536,16 @@ void CLuaHandle::Update()
 	if (!cmdStr.GetGlobalFunc(L))
 		return;
 
-	// call the routine
-	RunCallIn(L, cmdStr, 0, 0);
+	if (game) // null in LuaMenu
+		lua_pushnumber(L, game->updateDeltaSeconds);
+
+	RunCallIn(L, cmdStr, game ? 1 : 0, 0);
 }
 
 
 /*** Called whenever the window is resized.
  *
- * @function ViewResize
+ * @function Callins:ViewResize
  * @param viewSizeX number
  * @param viewSizeY number
  */
@@ -2440,7 +2587,7 @@ void CLuaHandle::ViewResize()
  *
  * Gets called before other Update and Draw callins.
  *
- * @function FontsChanged
+ * @function Callins:FontsChanged
  */
 void CLuaHandle::FontsChanged()
 {
@@ -2457,7 +2604,7 @@ void CLuaHandle::FontsChanged()
 }
 
 /***
- * @function SunChanged
+ * @function Callins:SunChanged
  */
 void CLuaHandle::SunChanged()
 {
@@ -2472,11 +2619,11 @@ void CLuaHandle::SunChanged()
 	RunCallIn(L, cmdStr, 0, 0);
 }
 
-/*** Used to set the default command when a unit is selected. First parameter is the type of the object pointed at (either "unit or "feature") and the second is its unitID or featureID respectively.
- *
- * @function DefaultCommand
- * @param type string "unit" | "feature"
- * @param id integer unitID | featureID
+/*** Used to set the default command when a unit is selected.
+ * 
+ * @function Callins:DefaultCommand
+ * @param type "unit"|"feature" The type of the object pointed at.
+ * @param id integer The `unitID` or `featureID`.
  */
 bool CLuaHandle::DefaultCommand(const CUnit* unit,
                                 const CFeature* feature, int& cmd)
@@ -2566,7 +2713,7 @@ void CLuaHandle::name()                       \
 
 /*** Use this callin to update textures, shaders, etc.
  *
- * @function DrawGenesis
+ * @function Callins:DrawGenesis
  *
  * Doesn't render to screen!
  * Also available to LuaMenu.
@@ -2575,74 +2722,74 @@ DRAW_CALLIN(DrawGenesis)
 
 /*** Spring draws command queues, 'map stuff', and map marks.
  *
- * @function DrawWorld
+ * @function Callins:DrawWorld
  */
 DRAW_CALLIN(DrawWorld)
 
 /*** Spring draws units, features, some water types, cloaked units, and the sun.
  *
- * @function DrawWorldPreUnit
+ * @function Callins:DrawWorldPreUnit
  */
 DRAW_CALLIN(DrawWorldPreUnit)
 
 /*** Called before decals are drawn
  *
- * @function DrawPreDecals
+ * @function Callins:DrawPreDecals
  */
 DRAW_CALLIN(DrawPreDecals)
 
 /***
- * @function DrawWaterPost
+ * @function Callins:DrawWaterPost
  */
 DRAW_CALLIN(DrawWaterPost)
 
 /*** Invoked after semi-transparent shadows pass is about to conclude
- * @function DrawShadowPassTransparent
+ * @function Callins:DrawShadowPassTransparent
  *
  * This callin has depth and color buffer of shadowmap bound via FBO as well as the FFP state to do "semi-transparent" shadows pass (traditionally only used to draw shadows of shadow casting semi-transparent particles). Can be used to draw nice colored shadows.
  */
 DRAW_CALLIN(DrawShadowPassTransparent)
 
-/*** @function DrawWorldShadow
+/*** @function Callins:DrawWorldShadow
  *
  */
 DRAW_CALLIN(DrawWorldShadow)
 
-/*** @function DrawWorldReflection
+/*** @function Callins:DrawWorldReflection
  *
  */
 DRAW_CALLIN(DrawWorldReflection)
 
-/*** @function DrawWorldRefraction
+/*** @function Callins:DrawWorldRefraction
  *
  */
 DRAW_CALLIN(DrawWorldRefraction)
 
 /*** Runs at the start of the forward pass when a custom map shader has been assigned via `Spring.SetMapShader` (convenient for setting uniforms).
  *
- * @function DrawGroundPreForward
+ * @function Callins:DrawGroundPreForward
  */
 DRAW_CALLIN(DrawGroundPreForward)
 
-/*** @function DrawGroundPostForward
+/*** @function Callins:DrawGroundPostForward
  *
  */
 DRAW_CALLIN(DrawGroundPostForward)
 
 /*** Runs at the start of the deferred pass when a custom map shader has been assigned via `Spring.SetMapShader` (convenient for setting uniforms).
  *
- * @function DrawGroundPreDeferred
+ * @function Callins:DrawGroundPreDeferred
  */
 DRAW_CALLIN(DrawGroundPreDeferred)
 
-/*** @function DrawGroundDeferred
+/*** @function Callins:DrawGroundDeferred
  *
  */
 DRAW_CALLIN(DrawGroundDeferred)
 
 /*** This runs at the end of its respective deferred pass.
  *
- * @function DrawGroundPostDeferred
+ * @function Callins:DrawGroundPostDeferred
  *
  * Allows proper frame compositing (with ground flashes/decals/foliage/etc, which are drawn between it and `DrawWorldPreUnit`) via `gl.CopyToTexture`.
  */
@@ -2650,7 +2797,7 @@ DRAW_CALLIN(DrawGroundPostDeferred)
 
 /*** Runs at the end of the unit deferred pass.
  *
- * @function DrawUnitsPostDeferred
+ * @function Callins:DrawUnitsPostDeferred
  *
  * Informs Lua code it should make use of the $model_gbuffer_* textures before another pass overwrites them (and to allow proper blending with e.g. cloaked objects which are drawn between these events and DrawWorld via gl.CopyToTexture). N.B. The *PostDeferred events are only sent (and only have a real purpose) if forward drawing is disabled.
  */
@@ -2658,16 +2805,16 @@ DRAW_CALLIN(DrawUnitsPostDeferred)
 
 /*** Runs at the end of the feature deferred pass to inform Lua code it should make use of the $model_gbuffer_* textures before another pass overwrites them (and to allow proper blending with e.g. cloaked objects which are drawn between these events and DrawWorld via gl.CopyToTexture). N.B. The *PostDeferred events are only sent (and only have a real purpose) if forward drawing is disabled.
  *
- * @function DrawFeaturesPostDeferred
+ * @function Callins:DrawFeaturesPostDeferred
  */
 DRAW_CALLIN(DrawFeaturesPostDeferred)
 
-/*** @function DrawShadowUnitsLua
+/*** @function Callins:DrawShadowUnitsLua
  *
  */
 DRAW_CALLIN(DrawShadowUnitsLua)
 
-/*** @function DrawShadowFeaturesLua
+/*** @function Callins:DrawShadowFeaturesLua
  *
  */
 DRAW_CALLIN(DrawShadowFeaturesLua)
@@ -2676,7 +2823,7 @@ DRAW_CALLIN(DrawShadowFeaturesLua)
  * DrawWorldPreParticles is called multiples times per draw frame.
  * Each call has a different permutation of values for drawAboveWater, drawBelowWater, drawReflection, and drawRefraction.
  *
- * @function DrawWorldPreParticles
+ * @function Callins:DrawWorldPreParticles
  * @param drawAboveWater boolean
  * @param drawBelowWater boolean
  * @param drawReflection boolean
@@ -2722,7 +2869,7 @@ inline void CLuaHandle::DrawScreenCommon(const LuaHashString& cmdStr)
 
 /*** Also available to LuaMenu.
  *
- * @function DrawScreen
+ * @function Callins:DrawScreen
  * @param viewSizeX number
  * @param viewSizeY number
  */
@@ -2738,7 +2885,7 @@ void CLuaHandle::DrawScreen()
 
 
 /***
- * @function DrawScreenEffects
+ * @function Callins:DrawScreenEffects
  * @param viewSizeX number
  * @param viewSizeY number
  */
@@ -2755,7 +2902,10 @@ void CLuaHandle::DrawScreenEffects()
 
 /*** Similar to DrawScreenEffects, this can be used to alter the contents of a frame after it has been completely rendered (i.e. World, MiniMap, Menu, UI).
  *
- * @function DrawScreenPost
+ * @function Callins:DrawScreenPost
+ *
+ * Note: This callin is invoked after the software rendered cursor (configuration variable HardwareCursor=0) is drawn.
+ *
  * @param viewSizeX number
  * @param viewSizeY number
  */
@@ -2772,7 +2922,7 @@ void CLuaHandle::DrawScreenPost()
 
 /***
  *
- * @function DrawInMiniMap
+ * @function Callins:DrawInMiniMap
  * @param sx number relative to the minimap's position and scale.
  * @param sy number relative to the minimap's position and scale.
  */
@@ -2800,7 +2950,7 @@ void CLuaHandle::DrawInMiniMap()
 
 /***
  *
- * @function DrawInMinimapBackground
+ * @function Callins:DrawInMiniMapBackground
  * @param sx number relative to the minimap's position and scale.
  * @param sy number relative to the minimap's position and scale.
  */
@@ -2877,7 +3027,7 @@ void CLuaHandle::DrawAlphaFeaturesLua(bool drawReflection, bool drawRefraction)
  *
  * Can give an ETA about catching up with simulation for mid-game join players.
  *
- * @function GameProgress
+ * @function Callins:GameProgress
  * @param serverFrameNum integer
  */
 void CLuaHandle::GameProgress(int frameNum)
@@ -2919,7 +3069,7 @@ void CLuaHandle::Pong(uint8_t pingTag, const spring_time pktSendTime, const spri
 
 /*** Called when the keymap changes
  *
- * @function KeyMapChanged
+ * @function Callins:KeyMapChanged
  *
  * Can be caused due to a change in language or keyboard
  */
@@ -2950,6 +3100,7 @@ bool CLuaHandle::KeyMapChanged()
 /*** Key Modifier Params
  *
  * @class KeyModifiers
+ * @x_helper
  *
  * @field right boolean Right mouse key pressed
  * @field alt boolean Alt key pressed
@@ -2960,7 +3111,7 @@ bool CLuaHandle::KeyMapChanged()
 
 /*** Called repeatedly when a key is pressed down.
  *
- * @function KeyPress
+ * @function Callins:KeyPress
  *
  * Return true if you don't want other callins or the engine to also receive this keypress. A list of key codes can be seen at the SDL wiki.
  *
@@ -3005,8 +3156,8 @@ bool CLuaHandle::KeyPress(int keyCode, int scanCode, bool isRepeat)
 
 	if (isGame) {
 		int i = 1;
-		lua_createtable(L, 0, game->lastActionList.size());
-		for (const Action& action: game->lastActionList) {
+		lua_createtable(L, 0, game->GetLastActionList().size());
+		for (const Action& action: game->GetLastActionList()) {
 			lua_createtable(L, 0, 3); {
 				LuaPushNamedString(L, "command",   action.command);
 				LuaPushNamedString(L, "extra",     action.extra);
@@ -3028,7 +3179,7 @@ bool CLuaHandle::KeyPress(int keyCode, int scanCode, bool isRepeat)
 
 /*** Called when the key is released.
  *
- * @function KeyRelease
+ * @function Callins:KeyRelease
  *
  * @param keyCode number
  * @param mods KeyModifiers
@@ -3066,8 +3217,8 @@ bool CLuaHandle::KeyRelease(int keyCode, int scanCode)
 
 	if (isGame) {
 		int i = 1;
-		lua_createtable(L, 0, game->lastActionList.size());
-		for (const Action& action: game->lastActionList) {
+		lua_createtable(L, 0, game->GetLastActionList().size());
+		for (const Action& action: game->GetLastActionList()) {
 			lua_createtable(L, 0, 3); {
 				LuaPushNamedString(L, "command",   action.command);
 				LuaPushNamedString(L, "extra",     action.extra);
@@ -3089,7 +3240,7 @@ bool CLuaHandle::KeyRelease(int keyCode, int scanCode)
 
 /*** Called whenever a key press results in text input.
  *
- * @function TextInput
+ * @function Callins:TextInput
  *
  * @param utf8char string
  */
@@ -3117,7 +3268,7 @@ bool CLuaHandle::TextInput(const std::string& utf8)
 
 /***
  *
- * @function TextEditing
+ * @function Callins:TextEditing
  *
  * @param utf8 string
  * @param start number
@@ -3149,7 +3300,7 @@ bool CLuaHandle::TextEditing(const std::string& utf8, unsigned int start, unsign
  *
  * The button parameter supports up to 7 buttons. Must return true for `MouseRelease` and other functions to be called.
  *
- * @function MousePress
+ * @function Callins:MousePress
  * @param x number
  * @param y number
  * @param button number
@@ -3180,7 +3331,7 @@ bool CLuaHandle::MousePress(int x, int y, int button)
 
 /*** Called when a mouse button is released.
  *
- * @function MouseRelease
+ * @function Callins:MouseRelease
  *
  * Please note that in order to have Spring call `Spring.MouseRelease`, you need to have a `Spring.MousePress` call-in in the same addon that returns true.
  *
@@ -3209,7 +3360,7 @@ void CLuaHandle::MouseRelease(int x, int y, int button)
 
 /*** Called when the mouse is moved.
  *
- * @function MouseMove
+ * @function Callins:MouseMove
  *
  * @param x number final x position
  * @param y number final y position
@@ -3244,7 +3395,7 @@ bool CLuaHandle::MouseMove(int x, int y, int dx, int dy, int button)
 
 /*** Called when the mouse wheel is moved.
  *
- * @function MouseWheel
+ * @function Callins:MouseWheel
  *
  * @param up boolean the direction
  * @param value number the amount travelled
@@ -3271,7 +3422,7 @@ bool CLuaHandle::MouseWheel(bool up, float value)
 
 /*** Called every `Update`.
  *
- * @function IsAbove
+ * @function Callins:IsAbove
  *
  * Must return true for `Mouse*` events and `Spring.GetToolTip` to be called.
  *
@@ -3302,7 +3453,7 @@ bool CLuaHandle::IsAbove(int x, int y)
 
 /*** Called when `Spring.IsAbove` returns true.
  *
- * @function GetTooltip
+ * @function Callins:GetTooltip
  * @param x number
  * @param y number
  * @return string tooltip
@@ -3330,7 +3481,7 @@ string CLuaHandle::GetTooltip(int x, int y)
 
 /*** Called when a command is issued.
  *
- * @function ActiveCommandChanged
+ * @function Callins:ActiveCommandChanged
  * @param cmdId integer?
  * @param cmdType integer?
  */
@@ -3354,9 +3505,139 @@ void CLuaHandle::ActiveCommandChanged(const SCommandDescription* cmdDesc)
 	}
 }
 
+/*** Called whenever the camera rotation changes
+ *
+ * @function Callins:CameraRotationChanged
+ * @param rotX number Camera rotation around the x axis in radians.
+ * @param rotY number Camera rotation around the y axis in radians.
+ * @param rotZ number Camera rotation around the z axis in radians.
+ */
+void CLuaHandle::CameraRotationChanged(const float3& rot)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	LUA_CALL_IN_CHECK(L, false);
+	luaL_checkstack(L, 6, __func__);
+	static const LuaHashString cmdStr(__func__);
+	if (!cmdStr.GetGlobalFunc(L))
+		return;
+
+	lua_pushnumber(L, rot.x);
+	lua_pushnumber(L, rot.y);
+	lua_pushnumber(L, rot.z);
+
+	RunCallIn(L, cmdStr, 3, 0);
+}
+
+/*** Called whenever the camera position changes
+ *
+ * @function Callins:CameraPositionChanged
+ * @param posX number Camera position x in world coordinates
+ * @param posY number Camera position y in world coordinates
+ * @param posZ number Camera position z in world coordinates
+ */
+void CLuaHandle::CameraPositionChanged(const float3& pos)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	LUA_CALL_IN_CHECK(L, false);
+	luaL_checkstack(L, 6, __func__);
+
+	static const LuaHashString cmdStr(__func__);
+	if (!cmdStr.GetGlobalFunc(L))
+		return;
+
+	lua_pushnumber(L, pos.x);
+	lua_pushnumber(L, pos.y);
+	lua_pushnumber(L, pos.z);
+
+	RunCallIn(L, cmdStr, 3, 0);
+}
+
+/*** Called when the MiniMap rotation changes
+ * 
+ * @function Callins:MiniMapRotationChanged
+ * @param newRot number MiniMap rotation in radians
+ * @param oldRot number MiniMap old rotation in radians
+ */
+void CLuaHandle::MiniMapRotationChanged(const float newRot, const float oldRot)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	LUA_CALL_IN_CHECK(L, false);
+	luaL_checkstack(L, 5, __func__);
+
+	static const LuaHashString cmdStr(__func__);
+	if (!cmdStr.GetGlobalFunc(L))
+		return;
+
+	lua_pushnumber(L, newRot);
+	lua_pushnumber(L, oldRot);
+
+	RunCallIn(L, cmdStr, 2, 0);
+}
+
+/*** Called when the MiniMap minimizes or maximizes changes
+ * 
+ * @function Callins:MiniMapStateChanged
+ * @param isMinimized boolean
+ * @param isMaximized boolean
+ */
+void CLuaHandle::MiniMapStateChanged(const bool isMinimized,
+									const bool isMaximized,
+									const bool isSlaved)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	LUA_CALL_IN_CHECK(L, false);
+	luaL_checkstack(L, 5, __func__);
+
+	static const LuaHashString cmdStr(__func__);
+	if (!cmdStr.GetGlobalFunc(L))
+		return;
+
+	lua_pushboolean(L, isMinimized);
+	lua_pushboolean(L, isMaximized);
+	lua_pushboolean(L, isSlaved);
+
+
+	RunCallIn(L, cmdStr, 3, 0);
+}
+
+/*** Called when the MiniMap Geometry changes
+ * 
+ * @function Callins:MiniMapGeometryChanged
+ * @param newPosX number in pixels
+ * @param newPosY number in pixels
+ * @param newDimX number in pixels
+ * @param newDimY number in pixels
+ * @param oldPosX number in pixels
+ * @param oldPosY number in pixels
+ * @param oldDimX number in pixels
+ * @param oldDimY number in pixels
+ */
+void CLuaHandle::MiniMapGeometryChanged(const int2 newPos, const int2 newDim, const int2 oldPos, const int2 oldDim)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	LUA_CALL_IN_CHECK(L, false);
+	luaL_checkstack(L, 11, __func__); // 3 + 8 args
+
+	static const LuaHashString cmdStr(__func__);
+	if (!cmdStr.GetGlobalFunc(L))
+		return;
+
+	lua_pushnumber(L, newPos.x);
+	lua_pushnumber(L, newPos.y);
+	lua_pushnumber(L, newDim.x);
+	lua_pushnumber(L, newDim.y);
+	
+	lua_pushnumber(L, oldPos.x);
+	lua_pushnumber(L, oldPos.y);
+	lua_pushnumber(L, oldDim.x);
+	lua_pushnumber(L, oldDim.y);
+
+	RunCallIn(L, cmdStr, 8, 0);
+}
+
 /*** Called when a command is issued.
  *
- * @function CommandNotify
+ * @function Callins:CommandNotify
  * @param cmdID integer
  * @param cmdParams table
  * @param options CommandOptions
@@ -3392,7 +3673,7 @@ bool CLuaHandle::CommandNotify(const Command& cmd)
 
 /*** Called when text is entered into the console (e.g. `Spring.Echo`).
  *
- * @function AddConsoleLine
+ * @function Callins:AddConsoleLine
  * @param msg string
  * @param priority integer
  */
@@ -3415,8 +3696,8 @@ bool CLuaHandle::AddConsoleLine(const string& msg, const string& section, int le
 
 /*** Called when a unit is added to or removed from a control group.
  *
- * @function GroupChanged
- * @param groupID number
+ * @function Callins:GroupChanged
+ * @param groupID integer
  */
 bool CLuaHandle::GroupChanged(int groupID)
 {
@@ -3433,15 +3714,30 @@ bool CLuaHandle::GroupChanged(int groupID)
 	return RunCallIn(L, cmdStr, 1, 0);
 }
 
-
-
 /***
- * @function WorldTooltip
- * @param ttType string "unit" | "feature" | "ground" | "selection"
- * @param data1 number unitID | featureID | posX
- * @param data2 number? posY
- * @param data3 number? posZ
- * @return string newTooltip
+ * @function Callins:WorldTooltip
+ * @param type "unit"
+ * @param unitId integer
+ * @return string tooltip
+ */
+/***
+ * @function Callins:WorldTooltip
+ * @param type "feature"
+ * @param featureId integer
+ * @return string tooltip
+ */
+/***
+ * @function Callins:WorldTooltip
+ * @param type "ground"
+ * @param posX number
+ * @param posY number
+ * @param posZ number
+ * @return string tooltip
+ */
+/***
+ * @function Callins:WorldTooltip
+ * @param type "selection"
+ * @return string tooltip
  */
 string CLuaHandle::WorldTooltip(const CUnit* unit,
                                 const CFeature* feature,
@@ -3486,18 +3782,34 @@ string CLuaHandle::WorldTooltip(const CUnit* unit,
 	return retval;
 }
 
-
 /***
- *
- * @function MapDrawCmd
- * @param playerID number
- * @param type string "point" | "line" | "erase"
+ * @function Callins:MapDrawCmd
+ * @param playerID integer
+ * @param type "point"
  * @param posX number
  * @param posY number
  * @param posZ number
- * @param data4 string|number point: label, erase: radius, line: pos2X
- * @param pos2Y number? when type is line
- * @param pos2Z number? when type is line
+ * @param label string
+ */
+/***
+ * @function Callins:MapDrawCmd
+ * @param playerID integer
+ * @param type "line"
+ * @param pos1X number
+ * @param pos1Y number
+ * @param pos1Z number
+ * @param pos2X number
+ * @param pos2Y number
+ * @param pos2Z number
+ */
+/***
+ * @function Callins:MapDrawCmd
+ * @param playerID integer
+ * @param type "erase"
+ * @param posX number
+ * @param posY number
+ * @param posZ number
+ * @param radius number
  */
 bool CLuaHandle::MapDrawCmd(int playerID, int type,
                             const float3* pos0,
@@ -3559,13 +3871,31 @@ bool CLuaHandle::MapDrawCmd(int playerID, int type,
 
 
 /***
+ * @enum READY_MESSAGE
+ * @field WAITING "Waiting for players"
+ * @field HOST_WAITING "Waiting for players, press key to force start" when waiting and currently the host, key is the first key bound to the action forcestart
+ * @field CHOOSE_POS "Choose start pos" when current player is not ready and is not a spectator
+ * @field STARTING "Starting in n" where n is the number of seconds
+ */
+
+/***
+ * @enum READY_STATE
+ * @field MISSING "missing" when the player hasn't joined yet (NETMSG_PLAYERNAME wasn't received)
+ * @field READY "ready"
+ * @field NOT_READY "notready"
+ */
+
+/*** Fired when the pregame stage is reached
  *
- * @function GameSetup
- * @param state string
- * @param ready boolean
- * @param playerStates table
- * @return boolean success
- * @return boolean newReady
+ * Pregame is the stage where player readiness is managed before a game starts.
+ * Game only starts once all players are ready.
+ *
+ * @function Callins:GameSetup
+ * @param state READY_MESSAGE the current message the engine would display to the player
+ * @param ready boolean whether the player is currently ready or not
+ * @param playerStates table<number,READY_STATE> indexed by playerID
+ * @return boolean? gameHandled disables the engine ui when true
+ * @return boolean? newReady whether the player is ready (ignored unless `gameHandled = true`)
  */
 bool CLuaHandle::GameSetup(const string& state, bool& ready,
                            const std::vector< std::pair<int, std::string> >& playerStates)
@@ -3609,7 +3939,7 @@ bool CLuaHandle::GameSetup(const string& state, bool& ready,
 
 
 
-/*** @function RecvSkirmishAIMessage
+/*** @function Callins:RecvSkirmishAIMessage
  *
  * @param aiTeam integer
  * @param dataStr string
@@ -3656,8 +3986,8 @@ const char* CLuaHandle::RecvSkirmishAIMessage(int aiTeam, const char* inData, in
 
 /*** Called when a Pr-downloader download is queued
  *
- * @function DownloadQueued
- * @param id number
+ * @function Callins:DownloadQueued
+ * @param id integer
  * @param name string
  * @param type string
  */
@@ -3684,8 +4014,8 @@ void CLuaHandle::DownloadQueued(int ID, const string& archiveName, const string&
 
 /*** Called when a Pr-downloader download is started via VFS.DownloadArchive.
  *
- * @function DownloadStarted
- * @param id number
+ * @function Callins:DownloadStarted
+ * @param id integer
  */
 void CLuaHandle::DownloadStarted(int ID)
 {
@@ -3707,8 +4037,8 @@ void CLuaHandle::DownloadStarted(int ID)
 
 /*** Called when a Pr-downloader download finishes successfully.
  *
- * @function DownloadFinished
- * @param id number
+ * @function Callins:DownloadFinished
+ * @param id integer
  */
 void CLuaHandle::DownloadFinished(int ID)
 {
@@ -3730,9 +4060,9 @@ void CLuaHandle::DownloadFinished(int ID)
 
 /*** Called when a Pr-downloader download fails to complete.
  *
- * @function DownloadFailed
- * @param id number
- * @param errorID number
+ * @function Callins:DownloadFailed
+ * @param id integer
+ * @param errorID integer
  */
 void CLuaHandle::DownloadFailed(int ID, int errorID)
 {
@@ -3755,10 +4085,10 @@ void CLuaHandle::DownloadFailed(int ID, int errorID)
 
 /*** Called incrementally during a Pr-downloader download.
  *
- * @function DownloadProgress
- * @param id number
- * @param downloaded number
- * @param total number
+ * @function Callins:DownloadProgress
+ * @param id integer
+ * @param downloaded integer
+ * @param total integer
  */
 void CLuaHandle::DownloadProgress(int ID, long downloaded, long total)
 {
@@ -3876,16 +4206,13 @@ bool CLuaHandle::AddBasicCalls(lua_State* L)
 		HSTR_PUSH_CFUNC(L, "DelayByFrames",   CallOutDelayByFrames);
 		HSTR_PUSH_CFUNC(L, "IsEngineMinVersion", CallOutIsEngineMinVersion);
 		// special team constants
+
+		/*** @field Script.NO_ACCESS_TEAM -1 */
 		HSTR_PUSH_NUMBER(L, "NO_ACCESS_TEAM",  CEventClient::NoAccessTeam);
+		/*** @field Script.ALL_ACCESS_TEAM -2 */
 		HSTR_PUSH_NUMBER(L, "ALL_ACCESS_TEAM", CEventClient::AllAccessTeam);
 	}
 	lua_rawset(L, -3);
-
-	// extra math utilities
-	lua_getglobal(L, "math");
-	LuaBitOps::PushEntries(L);
-	LuaMathExtra::PushEntries(L);
-	lua_pop(L, 1);
 
 	lua_getglobal(L, "table");
 	LuaTableExtra::PushEntries(L);
@@ -3894,7 +4221,19 @@ bool CLuaHandle::AddBasicCalls(lua_State* L)
 	return true;
 }
 
+bool CLuaHandle::AddCommonModules(lua_State* L)
+{
+	if (!AddEntriesToTable(L, "Encoding",           LuaEncoding::PushEntries        ))
+		return false;
+	if (!AddEntriesToTable(L, "math",               LuaMathExtra::PushEntries       ))
+		return false;
+	return true;
+}
 
+/***
+ * @function Script.GetName
+ * @return string name
+ */
 int CLuaHandle::CallOutGetName(lua_State* L)
 {
 	lua_pushsstring(L, GetHandle(L)->GetName());
@@ -3902,6 +4241,10 @@ int CLuaHandle::CallOutGetName(lua_State* L)
 }
 
 
+/***
+ * @function Script.GetSynced
+ * @return boolean synced
+ */
 int CLuaHandle::CallOutGetSynced(lua_State* L)
 {
 	lua_pushboolean(L, GetHandleSynced(L));
@@ -3909,6 +4252,10 @@ int CLuaHandle::CallOutGetSynced(lua_State* L)
 }
 
 
+/***
+ * @function Script.GetFullCtrl
+ * @return boolean fullCtrl
+ */
 int CLuaHandle::CallOutGetFullCtrl(lua_State* L)
 {
 	lua_pushboolean(L, GetHandleFullCtrl(L));
@@ -3916,6 +4263,10 @@ int CLuaHandle::CallOutGetFullCtrl(lua_State* L)
 }
 
 
+/***
+ * @function Script.GetFullRead
+ * @return boolean fullRead
+ */
 int CLuaHandle::CallOutGetFullRead(lua_State* L)
 {
 	lua_pushboolean(L, GetHandleFullRead(L));
@@ -3923,6 +4274,10 @@ int CLuaHandle::CallOutGetFullRead(lua_State* L)
 }
 
 
+/***
+ * @function Script.GetCtrlTeam
+ * @return integer teamID
+ */
 int CLuaHandle::CallOutGetCtrlTeam(lua_State* L)
 {
 	lua_pushnumber(L, GetHandleCtrlTeam(L));
@@ -3930,6 +4285,10 @@ int CLuaHandle::CallOutGetCtrlTeam(lua_State* L)
 }
 
 
+/***
+ * @function Script.GetReadTeam
+ * @return integer teamID
+ */
 int CLuaHandle::CallOutGetReadTeam(lua_State* L)
 {
 	lua_pushnumber(L, GetHandleReadTeam(L));
@@ -3937,6 +4296,10 @@ int CLuaHandle::CallOutGetReadTeam(lua_State* L)
 }
 
 
+/***
+ * @function Script.GetReadAllyTeam
+ * @return integer allyTeamID
+ */
 int CLuaHandle::CallOutGetReadAllyTeam(lua_State* L)
 {
 	lua_pushnumber(L, GetHandleReadAllyTeam(L));
@@ -3944,6 +4307,10 @@ int CLuaHandle::CallOutGetReadAllyTeam(lua_State* L)
 }
 
 
+/***
+ * @function Script.GetSelectTeam
+ * @return integer teamID
+ */
 int CLuaHandle::CallOutGetSelectTeam(lua_State* L)
 {
 	lua_pushnumber(L, GetHandleSelectTeam(L));
@@ -3951,6 +4318,10 @@ int CLuaHandle::CallOutGetSelectTeam(lua_State* L)
 }
 
 
+/***
+ * @function Script.GetGlobal
+ * @return integer? global
+ */
 int CLuaHandle::CallOutGetGlobal(lua_State* L)
 {
 	if (devMode) {
@@ -3961,6 +4332,10 @@ int CLuaHandle::CallOutGetGlobal(lua_State* L)
 }
 
 
+/***
+ * @function Script.GetRegistry
+ * @return integer? registry
+ */
 int CLuaHandle::CallOutGetRegistry(lua_State* L)
 {
 	if (devMode) {
@@ -3971,11 +4346,17 @@ int CLuaHandle::CallOutGetRegistry(lua_State* L)
 }
 
 
+/** Documented at LuaUtils::IsEngineMinVersion */
 int CLuaHandle::CallOutIsEngineMinVersion(lua_State* L)
 {
 	return (LuaUtils::IsEngineMinVersion(L));
 }
 
+/***
+ * @function Script.DelayByFrames
+ * @param frameDelay integer
+ * @param fun(...) func
+ */
 int CLuaHandle::CallOutDelayByFrames(lua_State* L)
 {
 	int argCount = lua_gettop(L);
@@ -4033,6 +4414,171 @@ int CLuaHandle::CallOutUpdateCallIn(lua_State* L)
 void CLuaHandle::InitializeRmlUi()
 {
 	rmlui = RmlGui::InitializeLua(L);
+}
+
+
+/******************************************************************************/
+/******************************************************************************/
+
+int CLuaHandle::UnpackCobArg(lua_State* L)
+{
+	if (currentCobArgs == nullptr) {
+		luaL_error(L, "Error in UnpackCobArg(), no current args");
+	}
+	const int arg = luaL_checkint(L, 1) - 1;
+	if ((arg < 0) || (arg >= MAX_LUA_COB_ARGS)) {
+		luaL_error(L, "Error in UnpackCobArg(), bad index");
+	}
+	const int value = currentCobArgs[arg];
+	lua_pushnumber(L, UNPACKX(value));
+	lua_pushnumber(L, UNPACKZ(value));
+	return 2;
+}
+
+
+void CLuaHandle::Cob2Lua(const LuaHashString& name, const CUnit* unit,
+                        int& argsCount, int args[MAX_LUA_COB_ARGS])
+{
+	const bool synced = GetHandleSynced(L);
+	static int callDepth = 0;
+	if (callDepth >= 16) {
+		LOG_L(L_WARNING, "[%s::%s] call overflow: %s", GetName().c_str(), __func__, name.GetString());
+		args[0] = 0; // failure
+		return;
+	}
+
+	if (!synced && !LuaUtils::IsUnitInLos(L, unit))
+		return;
+
+	LUA_CALL_IN_CHECK(L);
+
+	const int top = lua_gettop(L);
+
+	if (!lua_checkstack(L, 1 + 3 + argsCount)) {
+		if (synced)
+			LOG_L(L_WARNING, "[%s::%s] lua_checkstack() error: %s", GetName().c_str(),  __func__, name.GetString());
+		args[0] = 0; // failure
+		lua_settop(L, top);
+		return;
+	}
+
+	if (!name.GetGlobalFunc(L)) {
+		if (synced)
+			LOG_L(L_WARNING, "[%s::%s] missing function: %s", GetName().c_str(), __func__, name.GetString());
+		args[0] = 0; // failure
+		lua_settop(L, top);
+		return;
+	}
+
+	lua_pushnumber(L, unit->id);
+	lua_pushnumber(L, unit->unitDef->id);
+	lua_pushnumber(L, unit->team);
+	for (int a = 0; a < argsCount; a++) {
+		lua_pushnumber(L, args[a]);
+	}
+
+	// call the routine
+	callDepth++;
+	const int* oldArgs = currentCobArgs;
+	currentCobArgs = args;
+
+	const bool error = !RunCallIn(L, name, 3 + argsCount, LUA_MULTRET);
+
+	currentCobArgs = oldArgs;
+	callDepth--;
+
+	// bail on error
+	if (error) {
+		args[0] = 0; // failure
+		lua_settop(L, top);
+		return;
+	}
+
+	// get the results
+	const int retArgs = std::min(lua_gettop(L) - top, (MAX_LUA_COB_ARGS - 1));
+	for (int a = 1; a <= retArgs; a++) {
+		const int index = (a + top);
+		if (lua_isnumber(L, index)) {
+			args[a] = lua_toint(L, index);
+		}
+		else if (lua_isboolean(L, index)) {
+			args[a] = lua_toboolean(L, index) ? 1 : 0;
+		}
+		else if (lua_istable(L, index)) {
+			lua_rawgeti(L, index, 1);
+			lua_rawgeti(L, index, 2);
+			if (lua_isnumber(L, -2) && lua_isnumber(L, -1)) {
+				const int x = lua_toint(L, -2);
+				const int z = lua_toint(L, -1);
+				args[a] = PACKXZ(x, z);
+			} else {
+				args[a] = 0;
+			}
+			lua_pop(L, 2);
+		}
+		else {
+			args[a] = 0;
+		}
+	}
+
+	args[0] = 1; // success
+	lua_settop(L, top);
+}
+
+
+void CLuaHandle::Cob2LuaBatch(const LuaHashString& name, std::vector<CCobDeferredCallin>& callins)
+{
+	const bool synced = GetHandleSynced(L);
+	static int callDepth = 0;
+	if (callDepth >= 16) {
+		LOG_L(L_WARNING, "[%s::%s] call overflow: %s", GetName().c_str(), __func__, name.GetString());
+		return;
+	}
+
+	LUA_CALL_IN_CHECK(L);
+
+	const int top = lua_gettop(L);
+	int argsCount = 0;
+
+	if (!lua_checkstack(L, 1 + 3 + argsCount)) {
+		LOG_L(L_WARNING, "[%s::%s] lua_checkstack() error: %s", GetName().c_str(), __func__, name.GetString());
+		lua_settop(L, top);
+		return;
+	}
+
+	if (!name.GetGlobalFunc(L)) {
+		LOG_L(L_WARNING, "[%s::%s] missing function: %s", GetName().c_str(), __func__, name.GetString());
+		lua_settop(L, top);
+		return;
+	}
+
+	// count can be smaller because of LOS when unsynced
+	lua_createtable(L, callins.size(), 0);
+
+	int i = 0;
+	for(auto& callin: callins) {
+		// TODO check if unit still alive
+		if (!synced && !LuaUtils::IsUnitInLos(L, callin.unit))
+			continue;
+
+		lua_createtable(L, callin.argCount+1, 0);
+
+		for (int a = 0; a < callin.argCount; a++) {
+			lua_pushnumber(L, callin.luaArgs[a]);
+			lua_rawseti(L, -2, a + 1);
+		}
+
+		lua_rawseti(L, -2, ++i);
+	}
+
+	// call the routine
+	callDepth++;
+
+	const bool error = !RunCallIn(L, name, 1 + argsCount, LUA_MULTRET);
+
+	callDepth--;
+
+	lua_settop(L, top);
 }
 
 /******************************************************************************/
