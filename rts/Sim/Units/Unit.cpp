@@ -1995,6 +1995,25 @@ void CUnit::TurnIntoNanoframe()
 	eventHandler.UnitReverseBuilt(this);
 }
 
+bool CUnit::AllowUnitAutoRepair()
+const {
+	if (this->lastOwnerReclaim == 0) return true;
+	
+	if ((gs->frameNum) >= (this->lastOwnerReclaim + 900))
+	{
+		return true;
+	}
+	else
+	{
+		if ((this->lastOwnerReclaim) <= (this->lastOwnerBuildRepair))
+			{
+			return true;
+			}
+	}
+	return false;
+}
+		
+
 bool CUnit::AddBuildPower(CUnit* builder, float amount)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -2003,10 +2022,14 @@ bool CUnit::AddBuildPower(CUnit* builder, float amount)
 
 	// stop decaying on building AND reclaim
 	lastNanoAdd = gs->frameNum;
-
+	
 	CTeam* builderTeam = teamHandler.Team(builder->team);
 
 	if (amount >= 0.0f) {
+		// Register attempt to build/repair by owner
+		if ((builder->team)==(this->team))
+			lastOwnerBuildRepair = gs->frameNum;
+		
 		// build or repair
 		if (!beingBuilt && (health >= maxHealth))
 			return false;
@@ -2034,7 +2057,6 @@ bool CUnit::AddBuildPower(CUnit* builder, float amount)
 				if (buildProgress >= 1.0f)
 					FinishedBuilding(false);
 			}
-
 			return true;
 		}
 		else if (health < maxHealth) {
@@ -2062,6 +2084,8 @@ bool CUnit::AddBuildPower(CUnit* builder, float amount)
 		}
 	} else {
 		// reclaim
+		if ((builder->team)==(this->team))
+			lastOwnerReclaim = gs->frameNum;
 		if (!AllowedReclaim(builder)) {
 			builder->DependentDied(this);
 			return false;
