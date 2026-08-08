@@ -686,43 +686,80 @@ size_t CGameHelper::GenerateWeaponTargets(const CWeapon* weapon, const CUnit* av
 
 	const bool paralyzer = (weaponDmg->paralyzeDamageTime != 0);
 
-	// copy on purpose since the below calls lua
-	QuadFieldQuery qfQuery;
-	quadField.GetQuads(qfQuery, ownerPos, scanRadius);
+	// Use per-frame spatial cache: fills on first call for this (weaponDef, allyTeam, gridCell, range)
+	// and is reused by co-located weapons of the same def without a second quadfield query.
+	const std::vector<CUnit*>& cachedUnits = helper->FillOrGetQueryCache(
+		weaponDef->id, weaponOwner->allyteam, ownerPos, scanRadius);
 
 	targets.clear();
-	targets.reserve(32);
+	targets.reserve(cachedUnits.size());
+
+	// Cache outer weaponDef lookup outside the target loop — weaponDef is fixed per call.
+	const auto wdIt = helper->weaponDefToUnitDefMults.find(weaponDef->id);
+	const spring::unordered_map<int, float>* wdUnitDefMults =
+		(wdIt != helper->weaponDefToUnitDefMults.end()) ? &wdIt->second : nullptr;
+
+	const auto teamIt = helper->teamToUnitMults.find(weaponOwner->team);
+	const spring::unordered_map<int, float>* teamUnitMults =
+		(teamIt != helper->teamToUnitMults.end()) ? &teamIt->second : nullptr;
+
+	const auto allyTeamIt = helper->allyTeamToUnitMults.find(weaponOwner->allyteam);
+	const spring::unordered_map<int, float>* allyTeamUnitMults =
+		(allyTeamIt != helper->allyTeamToUnitMults.end()) ? &allyTeamIt->second : nullptr;
 
 	const int tempNum = gs->GetTempNum();
 
-	for (int t = 0; t < teamHandler.ActiveAllyTeams(); ++t) {
-		if (teamHandler.Ally(weaponOwner->allyteam, t))
-			continue;
-
-		for (const int qi: *qfQuery.quads) {
-			const std::vector<CUnit*>& allyTeamUnits = quadField.GetQuad(qi).teamUnits[t];
-
-			for (CUnit* targetUnit: allyTeamUnits) {
+	for (CUnit* targetUnit : cachedUnits) {
 				if (targetUnit->tempNum == tempNum)
 					continue;
 
 				targetUnit->tempNum = tempNum;
 
-				if (!weapon->TestTarget(testPos, SWeaponTarget(targetUnit)))
+				const unsigned short targetLOSState = targetUnit->losStatus[weaponOwner->allyteam];
+
+				if (!(targetLOSState & (LOS_INLOS | LOS_INRADAR)))
 					continue;
 
-				const unsigned short targetLOSState = targetUnit->losStatus[weaponOwner->allyteam];
+				// Apply priority mults when we know this unit's identity: currently in LOS, or previously seen and tracked.
+				float gamePriorityMult = 1.0f;
+				if (targetLOSState & (LOS_INLOS | LOS_PREVLOS)) {
+					gamePriorityMult = targetUnit->unitDef->defSelfPriorityMult * targetUnit->selfPriorityMult;
+
+					if (wdUnitDefMults != nullptr) {
+						if (const auto it = wdUnitDefMults->find(targetUnit->unitDef->id);
+						    it != wdUnitDefMults->end())
+							gamePriorityMult *= it->second;
+					}
+
+					if (const auto it = weaponOwner->unitToTargetUnitPriorityMults.find(targetUnit->id);
+					    it != weaponOwner->unitToTargetUnitPriorityMults.end())
+						gamePriorityMult *= it->second;
+
+					if (teamUnitMults != nullptr) {
+						if (const auto it = teamUnitMults->find(targetUnit->id); it != teamUnitMults->end())
+							gamePriorityMult *= it->second;
+					}
+
+					if (allyTeamUnitMults != nullptr) {
+						if (const auto it = allyTeamUnitMults->find(targetUnit->id); it != allyTeamUnitMults->end())
+							gamePriorityMult *= it->second;
+					}
+
+					if (gamePriorityMult == 0.0f)
+						continue;
+				}
+
+				if (!weapon->TestTarget(testPos, SWeaponTarget(targetUnit)))
+					continue;
 
 				float targetPriority = tgtPriorityMults[(targetUnit == avoidUnit) * 1];
 				float3 targetPos;
 
 				if (targetLOSState & LOS_INLOS) {
 					targetPos = targetUnit->aimPos;
-				} else if (targetLOSState & LOS_INRADAR) {
+				} else {
 					targetPos = weapon->GetUnitPositionWithError(targetUnit);
 					targetPriority *= tgtPriorityMults[1];
-				} else {
-					continue;
 				}
 
 				const float modRange = weapon->GetRange2D(rangeBoost, (targetPos.y - aimPosHeight) * heightMod);
@@ -768,7 +805,9 @@ size_t CGameHelper::GenerateWeaponTargets(const CWeapon* weapon, const CUnit* av
 					targetPriority *= tgtPriorityMults[(targetUnit == lastAttacker) * 4];
 				}
 
-				const bool allowTarget = eventHandler.AllowWeaponTarget(weaponOwner->id, targetUnit->id, weapon->weaponNum, weaponDef->id, &targetPriority);
+				targetPriority *= gamePriorityMult;
+
+				const bool allowTarget = !weapon->luaWatchTargets || eventHandler.AllowWeaponTarget(weaponOwner->id, targetUnit->id, weapon->weaponNum, weaponDef->id, &targetPriority);
 
 				// Lua call may have changed tempNum, so needs to be set again
 				targetUnit->tempNum = tempNum;
@@ -777,14 +816,71 @@ size_t CGameHelper::GenerateWeaponTargets(const CWeapon* weapon, const CUnit* av
 					continue;
 
 				targets.emplace_back(targetPriority, targetUnit);
-			}
-		}
 	}
 
 	std::stable_sort(targets.begin(), targets.end(), [](const std::pair<float, CUnit*>& a, const std::pair<float, CUnit*>& b) { return (a.first < b.first); });
 	return (targets.size());
 }
 
+
+uint64_t CGameHelper::MakeQueryCacheKey(int weaponDefID, int allyTeam, float x, float z, float scanRange)
+{
+	constexpr float POS_RES        = 128.0f;
+	constexpr float RANGE_RES      = 128.0f;
+	constexpr float POS_MAX_OFFSET = POS_RES * 1.41422f; // sqrt(2)*128 ≈ 181 elmos diagonal
+
+	const int gx = (int)std::floor(x         / POS_RES);
+	const int gz = (int)std::floor(z         / POS_RES);
+	const int gr = (int)std::ceil((scanRange + POS_MAX_OFFSET) / RANGE_RES);
+
+	return ((uint64_t)(weaponDefID & 0xFFFF) << 48)
+	     | ((uint64_t)(allyTeam   & 0xFF  ) << 40)
+	     | ((uint64_t)(gx         & 0xFFFF) << 24)
+	     | ((uint64_t)(gz         & 0xFFFF) <<  8)
+	     | ((uint64_t)(gr         & 0xFF  ));
+}
+
+
+const std::vector<CUnit*>& CGameHelper::FillOrGetQueryCache(int weaponDefID, int allyTeam, const float3& pos, float scanRange)
+{
+	const uint64_t key = MakeQueryCacheKey(weaponDefID, allyTeam, pos.x, pos.z, scanRange);
+	auto& entry = weaponQueryCache[key];
+
+	if (entry.frame == gs->frameNum)
+		return entry.units; // cache hit
+
+	constexpr float POS_RES        = 128.0f;
+	constexpr float RANGE_RES      = 128.0f;
+	constexpr float POS_MAX_OFFSET = POS_RES * 1.41422f;
+
+	const int gx = (int)std::floor(pos.x / POS_RES);
+	const int gz = (int)std::floor(pos.z / POS_RES);
+	const int gr = (int)std::ceil((scanRange + POS_MAX_OFFSET) / RANGE_RES);
+	const float3 queryPos(gx * POS_RES, pos.y, gz * POS_RES);
+	const float  queryR = gr * RANGE_RES;
+
+	entry.units.clear();
+
+	const int tempNum = gs->GetTempNum();
+
+	QuadFieldQuery qfQuery;
+	quadField.GetQuads(qfQuery, queryPos, queryR);
+
+	for (int t = 0; t < teamHandler.ActiveAllyTeams(); ++t) {
+		if (teamHandler.Ally(allyTeam, t)) continue;
+		for (const int qi : *qfQuery.quads) {
+			for (CUnit* u : quadField.GetQuad(qi).teamUnits[t]) {
+				if (u->tempNum == tempNum) continue;
+				u->tempNum = tempNum;
+				if (!u->isDead)
+					entry.units.push_back(u);
+			}
+		}
+	}
+
+	entry.frame = gs->frameNum;
+	return entry.units;
+}
 
 
 CUnit* CGameHelper::GetClosestUnit(const float3& pos, float searchRadius)

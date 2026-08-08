@@ -264,6 +264,8 @@ bool LuaSyncedRead::PushEntries(lua_State* L)
 	REGISTER_LUA_CFUNC(GetUnitWeaponHaveFreeLineOfFire);
 	REGISTER_LUA_CFUNC(GetUnitWeaponCanFire);
 	REGISTER_LUA_CFUNC(GetUnitWeaponTarget);
+	REGISTER_LUA_CFUNC(QueryUnitTargets);
+	REGISTER_LUA_CFUNC(GetQueryCacheKey);
 	REGISTER_LUA_CFUNC(GetUnitTravel);
 	REGISTER_LUA_CFUNC(GetUnitFuel);
 	REGISTER_LUA_CFUNC(GetUnitEstimatedPath);
@@ -5713,6 +5715,74 @@ int LuaSyncedRead::GetUnitWeaponTarget(lua_State* L)
 	}
 
 	return 3;
+}
+
+/***
+ * Returns the list of raw enemy units in a weapon's scan sphere, using the per-frame spatial cache.
+ * Call this inside AllowWeaponTargetCheck to pre-pass exclusions or mults before AutoTarget runs.
+ * Also returns the cache key so the caller can maintain a Lua-side persistent table.
+ *
+ * @function Spring.QueryUnitTargets
+ * @param unitID integer
+ * @param weaponNum integer (1-based)
+ * @return table unitIDs   array of enemy unitIDs in scan sphere
+ * @return number cacheKey opaque frame-stable integer key for this query
+ */
+int LuaSyncedRead::QueryUnitTargets(lua_State* L)
+{
+	const CUnit* unit = ParseAllyUnit(L, __func__, 1);
+	if (unit == nullptr)
+		return 0;
+
+	const int weaponIdx = luaL_checkint(L, 2) - LUA_WEAPON_BASE_INDEX;
+	if (weaponIdx < 0 || weaponIdx >= (int)unit->weapons.size())
+		return 0;
+
+	const CWeapon* weapon = unit->weapons[weaponIdx];
+	const float scanRange = weapon->range + weapon->autoTargetRangeBoost;
+
+	const std::vector<CUnit*>& units = helper->FillOrGetQueryCache(
+		weapon->weaponDef->id, unit->allyteam, unit->pos, scanRange);
+
+	const uint64_t key = CGameHelper::MakeQueryCacheKey(
+		weapon->weaponDef->id, unit->allyteam, unit->pos.x, unit->pos.z, scanRange);
+
+	lua_createtable(L, (int)units.size(), 0);
+	for (int i = 0; i < (int)units.size(); ++i) {
+		lua_pushnumber(L, units[i]->id);
+		lua_rawseti(L, -2, i + 1);
+	}
+	lua_pushnumber(L, (lua_Number)(int64_t)key); // cast for Lua number range safety
+	return 2;
+}
+
+/***
+ * Returns only the cache key for a weapon's scan sphere without populating the Lua table.
+ * Cheap to call; use to check your own Lua-side cache before calling QueryUnitTargets.
+ *
+ * @function Spring.GetQueryCacheKey
+ * @param unitID integer
+ * @param weaponNum integer (1-based)
+ * @return number cacheKey opaque frame-stable integer key for this query
+ */
+int LuaSyncedRead::GetQueryCacheKey(lua_State* L)
+{
+	const CUnit* unit = ParseAllyUnit(L, __func__, 1);
+	if (unit == nullptr)
+		return 0;
+
+	const int weaponIdx = luaL_checkint(L, 2) - LUA_WEAPON_BASE_INDEX;
+	if (weaponIdx < 0 || weaponIdx >= (int)unit->weapons.size())
+		return 0;
+
+	const CWeapon* weapon = unit->weapons[weaponIdx];
+	const float scanRange = weapon->range + weapon->autoTargetRangeBoost;
+
+	const uint64_t key = CGameHelper::MakeQueryCacheKey(
+		weapon->weaponDef->id, unit->allyteam, unit->pos.x, unit->pos.z, scanRange);
+
+	lua_pushnumber(L, (lua_Number)(int64_t)key);
+	return 1;
 }
 
 

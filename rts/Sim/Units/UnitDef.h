@@ -138,6 +138,7 @@ public:
 	int idleTime;       ///< time a unit needs to idle before its considered idling
 
 	float power;
+	float defSelfPriorityMult = 1.0f; ///< base targeting priority multiplier for units of this def; lower = more preferred
 	unsigned int category;
 
 	float speed;        ///< maximum forward speed the unit can attain (elmos/sec)

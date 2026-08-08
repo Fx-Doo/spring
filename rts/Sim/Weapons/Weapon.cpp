@@ -642,7 +642,8 @@ void CWeapon::SetAttackTarget(const SWeaponTarget& newTarget)
 	if (newTarget == currentTarget)
 		return;
 
-	DropCurrentTarget();
+	const SWeaponTarget oldTarget = currentTarget;
+	InternalDropTarget();
 	currentTarget = newTarget;
 
 	if (newTarget.type == Target_Unit)
@@ -650,12 +651,13 @@ void CWeapon::SetAttackTarget(const SWeaponTarget& newTarget)
 
 	currentTargetPos = GetLeadTargetPos(newTarget);
 	UpdateWantedDir();
+
+	eventHandler.WeaponChangedTarget(owner, weaponNum, weaponDef->id, oldTarget, newTarget);
 }
 
 
-void CWeapon::DropCurrentTarget()
+void CWeapon::InternalDropTarget()
 {
-	RECOIL_DETAILED_TRACY_ZONE;
 	if (HaveUnitTarget())
 		DeleteDeathDependence(currentTarget.unit, DEPENDENCE_TARGETUNIT);
 
@@ -663,10 +665,34 @@ void CWeapon::DropCurrentTarget()
 }
 
 
+void CWeapon::DropCurrentTarget()
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	if (currentTarget.type == Target_None)
+		return;
+
+	const SWeaponTarget oldTarget = currentTarget;
+	InternalDropTarget();
+	eventHandler.WeaponChangedTarget(owner, weaponNum, weaponDef->id, oldTarget, SWeaponTarget());
+}
+
+
 bool CWeapon::AllowWeaponAutoTarget() const
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	const int checkAllowed = eventHandler.AllowWeaponTargetCheck(owner->id, weaponNum, weaponDef->id);
+
+	// Fill (or reuse) per-frame spatial cache for this weapon's scan sphere.
+	// Returns empty vector if no enemies are in range — early exit with zero cost for subsequent
+	// co-located weapons of the same def (they hit the cache too).
+	const std::vector<CUnit*>& cachedTargets = helper->FillOrGetQueryCache(
+		weaponDef->id, owner->allyteam, owner->pos, range + autoTargetRangeBoost);
+	if (cachedTargets.empty())
+		return false;
+
+	luaWatchTargets = false;
+	bool keepWatching = false;
+	const int checkAllowed = eventHandler.AllowWeaponTargetCheck(owner->id, weaponNum, weaponDef->id, keepWatching);
+	luaWatchTargets = keepWatching;
 	if (checkAllowed >= 0)
 		return checkAllowed;
 
@@ -720,12 +746,62 @@ bool CWeapon::AllowWeaponAutoTarget() const
 bool CWeapon::AutoTarget()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	if (!AllowWeaponAutoTarget())
-		return false;
 
 	// search for other in-range targets
 	lastTargetRetry = gs->frameNum;
 
+	// Target precedence during auto-targeting:
+	// 1. Current attack target (user ATTACK CMD) - if still valid, keep it
+	// 2. Priority targets (bypass HOLD FIRE restrictions)
+	// 3. Auto-target scan (fallback if above fail)
+	
+	// Check if current target is still valid (unit or position)
+	if (currentTarget.type != Target_None && currentTarget.isUserTarget) {
+		if (TryTarget(currentTarget)) {
+			return true;  // Keep current user-directed attack target
+		}
+	}
+	
+	// Check priority targets FIRST - they bypass HOLD FIRE restrictions
+	const auto& priorityTargets = owner->GetPriorityTargets();
+	for (const auto& priorityTarget : priorityTargets) {
+		if (priorityTarget.type == Target_None) {
+			continue;
+		}
+
+		// Gate: Only check targets the player has knowledge of (in previous LOS)
+		if (priorityTarget.type == Target_Unit && priorityTarget.unit != nullptr) {
+			if ((priorityTarget.unit->losStatus[owner->allyteam] & LOS_PREVLOS) == 0) {
+				continue;  // Skip units outside of previous line-of-sight
+			}
+		}
+
+		// Validate the priority target
+		if (!TryTarget(priorityTarget)) {
+			continue;
+		}
+
+		// Check firestate restrictions for unit targets
+		if (priorityTarget.type == Target_Unit && priorityTarget.unit != nullptr) {
+			if (priorityTarget.unit->IsNeutral() && (owner->fireState < FIRESTATE_FIREATNEUTRAL)) {
+				continue;
+			}
+		}
+
+		// Found a valid priority target - Priority targets MUST be marked as user targets to bypass HOLD FIRE restrictions
+		SWeaponTarget forcedUserTarget = priorityTarget;
+		forcedUserTarget.isUserTarget = true;
+		forcedUserTarget.isAutoTarget = false;
+		SetAttackTarget(forcedUserTarget);
+		return true;
+	}
+
+	// No priority targets worked - now check if auto-targeting is allowed
+	if (!AllowWeaponAutoTarget()) {
+		return false;
+	}
+
+	// No priority targets were usable, fall back to auto-target scan
 	const CUnit* avoidUnit = (avoidTarget && HaveUnitTarget()) ? currentTarget.unit : nullptr;
 
 	CUnit* goodTargetUnit = nullptr;

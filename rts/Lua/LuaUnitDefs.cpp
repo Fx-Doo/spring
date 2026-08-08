@@ -709,6 +709,7 @@ ADD_BOOL("canAttackWater",  canAttackWater); // CUSTOM
 	ADD_FLOAT("harvestEnergyStorage", ud.harvestStorage.energy);
 
 	ADD_FLOAT("power", ud.power);
+	ADD_FLOAT("defSelfPriorityMult", ud.defSelfPriorityMult);
 
 	ADD_FLOAT("health",       ud.health);
 	ADD_FLOAT("autoHeal",     ud.autoHeal);

@@ -209,6 +209,7 @@
 	SETUP_EVENT(AllowWeaponTargetCheck,     MANAGED_BIT | CONTROL_BIT)
 	SETUP_EVENT(AllowWeaponTarget,          MANAGED_BIT | CONTROL_BIT)
 	SETUP_EVENT(AllowWeaponInterceptTarget, MANAGED_BIT | CONTROL_BIT)
+	SETUP_EVENT(WeaponChangedTarget,        MANAGED_BIT)
 	SETUP_EVENT(UnitPreDamaged,             MANAGED_BIT | CONTROL_BIT)
 	SETUP_EVENT(FeaturePreDamaged,          MANAGED_BIT | CONTROL_BIT)
 	SETUP_EVENT(ShieldPreDamaged,           MANAGED_BIT | CONTROL_BIT)

@@ -4,6 +4,7 @@
 #define UNIT_H
 
 #include <vector>
+#include "System/UnorderedMap.hpp"
 
 #include "Sim/Objects/SolidObject.h"
 #include "Sim/Misc/Resource.h"
@@ -298,6 +299,14 @@ public:
 	// current attackee
 	SWeaponTarget curTarget;
 
+	// ordered list of priority targets to try before auto-target selection
+	std::vector<SWeaponTarget> priorityTargets;
+
+	// helper methods for managing priority targets
+	void AddPriorityTarget(const SWeaponTarget& target);
+	void RemovePriorityTarget(size_t index);
+	void ClearPriorityTargets();
+	const std::vector<SWeaponTarget>& GetPriorityTargets() const { return priorityTargets; }
 
 	// sufficient for the largest UnitScript (CLuaUnitScript)
 	uint8_t usMemBuffer[sizeof(CLuaUnitScript)];
@@ -343,7 +352,10 @@ public:
 	// indicate the relative power of the unit, used for experience calculations etc
 	float power = 100.0f;
 
-	// 0.0-1.0
+	/// dynamic targeting priority multiplier on this unit as a target; lower = more preferred
+	float selfPriorityMult = 1.0f;
+	/// per-attacker biases toward specific target units; 0 = hard deny, absent = 1.0 (keyed by target unit ID)
+	spring::unordered_map<int, float> unitToTargetUnitPriorityMults;
 	float buildProgress = 0.0f;
 	// if (health - this) is negative the unit is stunned
 	float paralyzeDamage = 0.0f;

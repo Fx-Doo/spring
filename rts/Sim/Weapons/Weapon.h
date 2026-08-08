@@ -132,6 +132,7 @@ private:
 
 	void UpdateInterceptTarget();
 	bool AllowWeaponAutoTarget() const;
+	void InternalDropTarget();
 	bool CobBlockShot() const;
 	bool CheckAimingAngle() const;
 	bool CanCallAimingScript(bool validAngle) const;
@@ -217,6 +218,7 @@ public:
 	float weaponAimAdjustPriority;
 	bool fastAutoRetargeting;
 	bool fastQueryPointUpdate;
+	mutable bool luaWatchTargets = false; // per-cycle gate for AllowWeaponTarget callins, set by AllowWeaponTargetCheck
 	unsigned int accurateLeading;
 	unsigned int burstControlWhenOutOfArc;
 

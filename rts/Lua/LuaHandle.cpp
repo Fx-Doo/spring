@@ -1221,6 +1221,55 @@ void CLuaHandle::UnitDestroyed(const CUnit* unit, const CUnit* attacker, int wea
 }
 
 
+void CLuaHandle::WeaponChangedTarget(const CUnit* attacker, int weaponNum, int weaponDefID, const SWeaponTarget& oldTarget, const SWeaponTarget& newTarget)
+{
+	LUA_CALL_IN_CHECK(L);
+	luaL_checkstack(L, 2 + 7 + 6, __func__);
+
+	const LuaUtils::ScopedDebugTraceBack traceBack(L);
+
+	static const LuaHashString cmdStr(__func__);
+
+	if (!cmdStr.GetGlobalFunc(L))
+		return;
+
+	lua_pushnumber(L, attacker->id);
+	lua_pushnumber(L, attacker->unitDef->id);
+	lua_pushnumber(L, attacker->team);
+	lua_pushnumber(L, weaponNum + LUA_WEAPON_BASE_INDEX);
+	lua_pushnumber(L, weaponDefID);
+
+	const auto PushTargetData = [&](const SWeaponTarget& tgt) {
+		switch (tgt.type) {
+			case Target_None:
+				lua_pushnil(L);
+				break;
+			case Target_Unit:
+				lua_createtable(L, 2, 0);
+				lua_pushnumber(L, tgt.unit->id); lua_rawseti(L, -2, 1);
+				lua_pushnumber(L, 'u');          lua_rawseti(L, -2, 2);
+				break;
+			case Target_Intercept:
+				lua_createtable(L, 2, 0);
+				lua_pushnumber(L, tgt.intercept->id); lua_rawseti(L, -2, 1);
+				lua_pushnumber(L, 'p');               lua_rawseti(L, -2, 2);
+				break;
+			case Target_Pos:
+				lua_createtable(L, 3, 0);
+				lua_pushnumber(L, tgt.groundPos.x); lua_rawseti(L, -2, 1);
+				lua_pushnumber(L, tgt.groundPos.y); lua_rawseti(L, -2, 2);
+				lua_pushnumber(L, tgt.groundPos.z); lua_rawseti(L, -2, 3);
+				break;
+		}
+	};
+
+	PushTargetData(oldTarget);
+	PushTargetData(newTarget);
+
+	RunCallInTraceback(L, cmdStr, 7, 0, traceBack.GetErrFuncIdx(), false);
+}
+
+
 /*** Called when a unit is transferred between teams. This is called before `UnitGiven` and in that moment unit is still assigned to the oldTeam.
  *
  * @function Callins:UnitTaken

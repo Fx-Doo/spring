@@ -191,6 +191,16 @@ bool LuaSyncedCtrl::PushEntries(lua_State* L)
 	REGISTER_LUA_CFUNC(SetUnitTooltip);
 	REGISTER_LUA_CFUNC(SetUnitHealth);
 	REGISTER_LUA_CFUNC(SetUnitMaxHealth);
+
+	REGISTER_LUA_CFUNC(AddUnitPriorityTarget);
+	REGISTER_LUA_CFUNC(RemoveUnitPriorityTarget);
+	REGISTER_LUA_CFUNC(ClearUnitPriorityTargets);
+
+	REGISTER_LUA_CFUNC(SetSelfPriorityMult);
+	REGISTER_LUA_CFUNC(SetUnitToTargetUnitPriorityMult);
+	REGISTER_LUA_CFUNC(SetWeaponDefToUnitDefPriorityMult);
+	REGISTER_LUA_CFUNC(SetTeamToUnitPriorityMult);
+	REGISTER_LUA_CFUNC(SetAllyTeamToUnitPriorityMult);
 	REGISTER_LUA_CFUNC(SetUnitStockpile);
 	REGISTER_LUA_CFUNC(SetUnitUseWeapons);
 	REGISTER_LUA_CFUNC(SetUnitWeaponState);
@@ -2375,6 +2385,213 @@ int LuaSyncedCtrl::SetUnitMaxHealth(lua_State* L)
 
 	unit->maxHealth = std::max(0.1f, luaL_checkfloat(L, 2));
 	unit->health = std::min(unit->maxHealth, unit->health);
+	return 0;
+}
+
+/***
+ * @function Spring.AddUnitPriorityTarget
+ *
+ * Adds a target to the unit's priority-target list.
+ * Priority targets are consulted before auto-target selection.
+ *
+ * @param unitID integer
+ * @param targetUnitID integer|nil  target unit, or nil if targeting a ground position
+ * @param targetX number
+ * @param targetY number
+ * @param targetZ number
+ * @return nil
+ */
+int LuaSyncedCtrl::AddUnitPriorityTarget(lua_State* L)
+{
+	CUnit* unit = ParseUnit(L, __func__, 1);
+	if (unit == nullptr)
+		return 0;
+
+	if (!CanControlUnit(L, unit))
+		return 0;
+
+	const int targetUnitID = luaL_optint(L, 2, -1);
+	const CUnit* targetUnit = (targetUnitID > 0) ? unitHandler.GetUnitUnsafe(targetUnitID) : nullptr;
+
+	SWeaponTarget target;
+	if (targetUnit != nullptr) {
+		// Unit target
+		target = SWeaponTarget(targetUnit, true, false);  // isUserTarget = true
+	} else {
+		// Ground position target
+		const float x = luaL_checkfloat(L, 3);
+		const float y = luaL_checkfloat(L, 4);
+		const float z = luaL_checkfloat(L, 5);
+		target = SWeaponTarget(float3(x, y, z), true, false);  // isUserTarget = true
+	}
+
+	unit->AddPriorityTarget(target);
+	return 0;
+}
+
+/***
+ * @function Spring.RemoveUnitPriorityTarget
+ *
+ * Removes a target from the unit's priority-target list by index.
+ * Indices are 0-based.
+ *
+ * @param unitID integer
+ * @param index integer  zero-based index
+ * @return nil
+ */
+int LuaSyncedCtrl::RemoveUnitPriorityTarget(lua_State* L)
+{
+	CUnit* unit = ParseUnit(L, __func__, 1);
+	if (unit == nullptr)
+		return 0;
+
+	if (!CanControlUnit(L, unit))
+		return 0;
+
+	const size_t index = luaL_checkint(L, 2);
+	unit->RemovePriorityTarget(index);
+	return 0;
+}
+
+/***
+ * @function Spring.ClearUnitPriorityTargets
+ *
+ * Clears all priority targets from the unit.
+ *
+ * @param unitID integer
+ * @return nil
+ */
+int LuaSyncedCtrl::ClearUnitPriorityTargets(lua_State* L)
+{
+	CUnit* unit = ParseUnit(L, __func__, 1);
+	if (unit == nullptr)
+		return 0;
+
+	if (!CanControlUnit(L, unit))
+		return 0;
+
+	unit->ClearPriorityTargets();
+	return 0;
+}
+
+/***
+ * @function Spring.SetSelfPriorityMult
+ *
+ * Sets the dynamic targeting priority multiplier on this unit as a target.
+ * Lower values make the unit more attractive to attackers (lower priority cost).
+ * Pass nil to restore the default value of 1.0.
+ *
+ * @param unitID integer
+ * @param mult number|nil
+ */
+int LuaSyncedCtrl::SetSelfPriorityMult(lua_State* L)
+{
+	CUnit* unit = ParseUnit(L, __func__, 1);
+	if (unit == nullptr)
+		return 0;
+	unit->selfPriorityMult = lua_isnil(L, 2) ? 1.0f : luaL_checkfloat(L, 2);
+	return 0;
+}
+
+/***
+ * @function Spring.SetUnitToTargetUnitPriorityMult
+ *
+ * Sets a per-attacker bias toward a specific target unit.
+ * 0 = hard deny (target skipped entirely before priority evaluation).
+ * Values in ]0; +inf[ are multipliers; absent entry defaults to 1.0.
+ * Pass nil to remove the entry.
+ *
+ * @param attackerID integer
+ * @param targetID integer
+ * @param mult number|nil
+ */
+int LuaSyncedCtrl::SetUnitToTargetUnitPriorityMult(lua_State* L)
+{
+	CUnit* attacker = ParseUnit(L, __func__, 1);
+	if (attacker == nullptr)
+		return 0;
+	const int targetID = luaL_checkint(L, 2);
+	if (lua_isnil(L, 3)) {
+		attacker->unitToTargetUnitPriorityMults.erase(targetID);
+	} else {
+		attacker->unitToTargetUnitPriorityMults[targetID] = luaL_checkfloat(L, 3);
+	}
+	return 0;
+}
+
+/***
+ * @function Spring.SetWeaponDefToUnitDefPriorityMult
+ *
+ * Sets a global weaponDef→unitDef priority multiplier.
+ * Typically called once at gadget initialization from a config file.
+ * Lower values make targets of that unitDef more preferred by that weaponDef.
+ * Pass nil to remove the entry (restores default of 1.0).
+ *
+ * @param weaponDefID integer
+ * @param unitDefID integer
+ * @param mult number|nil
+ */
+int LuaSyncedCtrl::SetWeaponDefToUnitDefPriorityMult(lua_State* L)
+{
+	const int weaponDefID = luaL_checkint(L, 1);
+	const int unitDefID   = luaL_checkint(L, 2);
+	if (lua_isnil(L, 3)) {
+		auto outerIt = helper->weaponDefToUnitDefMults.find(weaponDefID);
+		if (outerIt != helper->weaponDefToUnitDefMults.end())
+			outerIt->second.erase(unitDefID);
+	} else {
+		helper->weaponDefToUnitDefMults[weaponDefID][unitDefID] = luaL_checkfloat(L, 3);
+	}
+	return 0;
+}
+
+/***
+ * @function Spring.SetTeamToUnitPriorityMult
+ *
+ * Sets a targeting priority multiplier applied when any weapon of the given team
+ * considers the target unit. Pass nil to remove (restores default of 1.0).
+ * Only applied when the attacker has current intelligence on the target (LOS_PREVLOS).
+ *
+ * @param teamID integer
+ * @param targetUnitID integer
+ * @param mult number|nil
+ */
+int LuaSyncedCtrl::SetTeamToUnitPriorityMult(lua_State* L)
+{
+	const int teamID     = luaL_checkint(L, 1);
+	const int targetID   = luaL_checkint(L, 2);
+	if (lua_isnil(L, 3)) {
+		auto outerIt = helper->teamToUnitMults.find(teamID);
+		if (outerIt != helper->teamToUnitMults.end())
+			outerIt->second.erase(targetID);
+	} else {
+		helper->teamToUnitMults[teamID][targetID] = luaL_checkfloat(L, 3);
+	}
+	return 0;
+}
+
+/***
+ * @function Spring.SetAllyTeamToUnitPriorityMult
+ *
+ * Sets a targeting priority multiplier applied when any weapon of the given allyTeam
+ * considers the target unit. Pass nil to remove (restores default of 1.0).
+ * Only applied when the attacker has current intelligence on the target (LOS_PREVLOS).
+ *
+ * @param allyTeamID integer
+ * @param targetUnitID integer
+ * @param mult number|nil
+ */
+int LuaSyncedCtrl::SetAllyTeamToUnitPriorityMult(lua_State* L)
+{
+	const int allyTeamID = luaL_checkint(L, 1);
+	const int targetID   = luaL_checkint(L, 2);
+	if (lua_isnil(L, 3)) {
+		auto outerIt = helper->allyTeamToUnitMults.find(allyTeamID);
+		if (outerIt != helper->allyTeamToUnitMults.end())
+			outerIt->second.erase(targetID);
+	} else {
+		helper->allyTeamToUnitMults[allyTeamID][targetID] = luaL_checkfloat(L, 3);
+	}
 	return 0;
 }
 

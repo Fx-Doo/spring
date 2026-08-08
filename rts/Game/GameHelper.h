@@ -12,6 +12,7 @@
 #include "System/float4.h"
 #include "System/type2.h"
 
+#include "System/UnorderedMap.hpp"
 #include <array>
 #include <bit>
 #include <memory>
@@ -210,6 +211,12 @@ public:
 
 	static size_t GenerateWeaponTargets(const CWeapon* weapon, const CUnit* avoidUnit, std::vector<std::pair<float, CUnit*>>& targets);
 
+	/// Fill (or return cached) list of raw enemy units in scan sphere.
+	/// Key encodes (weaponDefID, allyTeam, gridX, gridZ, gridRange) — 128-elmo grid, 128-elmo range steps.
+	/// Cache is valid for one frame; empty results are cached so co-located weapons also early-exit cheaply.
+	const std::vector<CUnit*>& FillOrGetQueryCache(int weaponDefID, int allyTeam, const float3& pos, float scanRange);
+	static uint64_t MakeQueryCacheKey(int weaponDefID, int allyTeam, float x, float z, float scanRange);
+
 	void Init();
 	void Kill();
 	void Update();
@@ -268,6 +275,23 @@ private:
 public:
 	std::vector<int> targetUnitIDs; // GetEnemyUnits{NoLosTest}
 	std::vector<std::pair<float, CUnit*>> targetPairs; // GenerateWeaponTargets
+
+	/// Global weaponDef→unitDef priority multiplier table.
+	/// Set at game-init time from Lua (Spring.SetWeaponDefToUnitDefPriorityMult).
+	/// Outer key = weaponDefID, inner key = unitDefID, value = mult (absent == 1.0).
+	spring::unordered_map<int, spring::unordered_map<int, float>> weaponDefToUnitDefMults;
+
+	/// Per-team and per-allyTeam priority multipliers toward specific target units.
+	/// Outer key = teamID/allyTeamID, inner key = target unitID, value = mult (absent == 1.0).
+	spring::unordered_map<int, spring::unordered_map<int, float>> teamToUnitMults;
+	spring::unordered_map<int, spring::unordered_map<int, float>> allyTeamToUnitMults;
+
+	/// Per-frame spatial cache for weapon scan-sphere queries.
+	struct WeaponQueryCache {
+		std::vector<CUnit*> units;
+		int frame = -1;
+	};
+	spring::unordered_map<uint64_t, WeaponQueryCache> weaponQueryCache;
 };
 
 extern CGameHelper* helper;

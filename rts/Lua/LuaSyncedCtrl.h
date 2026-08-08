@@ -88,6 +88,16 @@ class LuaSyncedCtrl
 		static int SetUnitTooltip(lua_State* L);
 		static int SetUnitHealth(lua_State* L);
 		static int SetUnitMaxHealth(lua_State* L);
+
+		static int AddUnitPriorityTarget(lua_State* L);
+		static int RemoveUnitPriorityTarget(lua_State* L);
+		static int ClearUnitPriorityTargets(lua_State* L);
+
+		static int SetSelfPriorityMult(lua_State* L);
+		static int SetUnitToTargetUnitPriorityMult(lua_State* L);
+		static int SetWeaponDefToUnitDefPriorityMult(lua_State* L);
+		static int SetTeamToUnitPriorityMult(lua_State* L);
+		static int SetAllyTeamToUnitPriorityMult(lua_State* L);
 		static int SetUnitStockpile(lua_State* L);
 		static int SetUnitUseWeapons(lua_State* L);
 		static int SetUnitWeaponState(lua_State* L);

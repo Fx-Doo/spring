@@ -131,6 +131,7 @@ class CLuaHandle : public CEventClient
 		void UnitReverseBuilt(const CUnit* unit) override;
 		void UnitConstructionDecayed(const CUnit* unit, float timeSinceLastBuild, float iterationPeriod, float part) override;
 		void UnitDestroyed(const CUnit* unit, const CUnit* attacker, int weaponDefID) override;
+		void WeaponChangedTarget(const CUnit* attacker, int weaponNum, int weaponDefID, const SWeaponTarget& oldTarget, const SWeaponTarget& newTarget) override;
 		void UnitTaken(const CUnit* unit, int oldTeam, int newTeam) override;
 		void UnitGiven(const CUnit* unit, int oldTeam, int newTeam) override;
 

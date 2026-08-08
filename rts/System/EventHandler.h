@@ -10,6 +10,7 @@
 #include "Sim/Units/Unit.h"
 #include "Sim/Features/Feature.h"
 #include "Sim/Projectiles/Projectile.h"
+#include "Sim/Weapons/WeaponTarget.h"
 
 struct CExplosionParams;
 class CWeapon;
@@ -166,7 +167,7 @@ class CEventHandler
 		bool TerraformComplete(const CUnit* unit, const CUnit* build);
 		bool MoveCtrlNotify(const CUnit* unit, int data);
 
-		int AllowWeaponTargetCheck(unsigned int attackerID, unsigned int attackerWeaponNum, unsigned int attackerWeaponDefID);
+		int AllowWeaponTargetCheck(unsigned int attackerID, unsigned int attackerWeaponNum, unsigned int attackerWeaponDefID, bool& outKeepWatching);
 		bool AllowWeaponTarget(
 			unsigned int attackerID,
 			unsigned int targetID,
@@ -175,6 +176,7 @@ class CEventHandler
 			float* targetPriority
 		);
 		bool AllowWeaponInterceptTarget(const CUnit* interceptorUnit, const CWeapon* interceptorWeapon, const CProjectile* interceptorTarget);
+		void WeaponChangedTarget(const CUnit* attacker, int weaponNum, int weaponDefID, const SWeaponTarget& oldTarget, const SWeaponTarget& newTarget);
 
 		bool UnitPreDamaged(
 			const CUnit* unit,
@@ -424,6 +426,11 @@ inline void CEventHandler::UnitCreated(const CUnit* unit, const CUnit* builder)
 inline void CEventHandler::UnitDestroyed(const CUnit* unit, const CUnit* attacker, int weaponDefID)
 {
 	ITERATE_UNIT_ALLYTEAM_EVENTCLIENTLIST(UnitDestroyed, unit, attacker, weaponDefID)
+}
+
+inline void CEventHandler::WeaponChangedTarget(const CUnit* attacker, int weaponNum, int weaponDefID, const SWeaponTarget& oldTarget, const SWeaponTarget& newTarget)
+{
+	ITERATE_UNIT_ALLYTEAM_EVENTCLIENTLIST(WeaponChangedTarget, attacker, weaponNum, weaponDefID, oldTarget, newTarget)
 }
 
 #define UNIT_CALLIN_NO_PARAM(name)                                 \

@@ -164,6 +164,8 @@ class LuaSyncedRead {
 		static int GetUnitWeaponHaveFreeLineOfFire(lua_State* L);
 		static int GetUnitWeaponCanFire(lua_State* L);
 		static int GetUnitWeaponTarget(lua_State* L);
+		static int QueryUnitTargets(lua_State* L);
+		static int GetQueryCacheKey(lua_State* L);
 		static int GetUnitTravel(lua_State* L);
 		static int GetUnitFuel(lua_State* L);
 		static int GetUnitEstimatedPath(lua_State* L);

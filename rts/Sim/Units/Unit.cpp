@@ -2380,6 +2380,48 @@ bool CUnit::IssueResourceOrder(SResourceOrder* order)
 
 
 /******************************************************************************/
+
+void CUnit::AddPriorityTarget(const SWeaponTarget& target)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	priorityTargets.push_back(target);
+	
+	// Register death dependency if it's a unit target
+	if (target.type == Target_Unit && target.unit != nullptr) {
+		AddDeathDependence(target.unit, DEPENDENCE_TARGETUNIT);
+	}
+}
+
+
+void CUnit::RemovePriorityTarget(size_t index)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	if (index >= priorityTargets.size())
+		return;
+
+	const SWeaponTarget& target = priorityTargets[index];
+	if (target.type == Target_Unit && target.unit != nullptr) {
+		DeleteDeathDependence(target.unit, DEPENDENCE_TARGETUNIT);
+	}
+
+	priorityTargets.erase(priorityTargets.begin() + index);
+}
+
+
+void CUnit::ClearPriorityTargets()
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	// Clean up death dependencies for all unit targets
+	for (const auto& target : priorityTargets) {
+		if (target.type == Target_Unit && target.unit != nullptr) {
+			DeleteDeathDependence(target.unit, DEPENDENCE_TARGETUNIT);
+		}
+	}
+	priorityTargets.clear();
+}
+
+
+/******************************************************************************/
 /******************************************************************************/
 
 void CUnit::Activate()
@@ -2992,6 +3034,7 @@ CR_REG_METADATA(CUnit, (
 	CR_MEMBER(sonarStealth),
 
 	CR_MEMBER(curTarget),
+	CR_MEMBER(priorityTargets),
 
 	CR_MEMBER(resourcesCondUse),
 	CR_MEMBER(resourcesCondMake),

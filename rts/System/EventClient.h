@@ -35,6 +35,7 @@ struct BuildInfo;
 struct FeatureDef;
 class LuaMaterial;
 struct WeaponDef;
+struct SWeaponTarget;
 
 #ifndef zipFile
 	// might be defined through zip.h already
@@ -229,7 +230,7 @@ class CEventClient
 		virtual bool TerraformComplete(const CUnit* unit, const CUnit* build) { return false; }
 		virtual bool MoveCtrlNotify(const CUnit* unit, int data) { return false; }
 
-		virtual int AllowWeaponTargetCheck(unsigned int attackerID, unsigned int attackerWeaponNum, unsigned int attackerWeaponDefID) { return -1; }
+		virtual int AllowWeaponTargetCheck(unsigned int attackerID, unsigned int attackerWeaponNum, unsigned int attackerWeaponDefID, bool& outKeepWatching) { outKeepWatching = false; return -1; }
 		virtual bool AllowWeaponTarget(
 			unsigned int attackerID,
 			unsigned int targetID,
@@ -238,6 +239,8 @@ class CEventClient
 			float* targetPriority
 		) { return true; }
 		virtual bool AllowWeaponInterceptTarget(const CUnit* interceptorUnit, const CWeapon* interceptorWeapon, const CProjectile* interceptorTarget) { return true; }
+
+		virtual void WeaponChangedTarget(const CUnit* attacker, int weaponNum, int weaponDefID, const SWeaponTarget& oldTarget, const SWeaponTarget& newTarget) {}
 
 		virtual bool UnitPreDamaged(
 			const CUnit* unit,

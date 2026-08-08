@@ -396,15 +396,24 @@ bool CEventHandler::MoveCtrlNotify(const CUnit* unit, int data)
 }
 
 
-int CEventHandler::AllowWeaponTargetCheck(unsigned int attackerID, unsigned int attackerWeaponNum, unsigned int attackerWeaponDefID)
+int CEventHandler::AllowWeaponTargetCheck(unsigned int attackerID, unsigned int attackerWeaponNum, unsigned int attackerWeaponDefID, bool& outKeepWatching)
 {
 	ZoneScoped;
 	int result = -1;
+	outKeepWatching = false;
 
 	for (size_t i = 0; i < listAllowWeaponTargetCheck.size(); ) {
 		CEventClient* ec = listAllowWeaponTargetCheck[i];
 
-		result = std::max(result, ec->AllowWeaponTargetCheck(attackerID, attackerWeaponNum, attackerWeaponDefID));
+		bool kw = false;
+		const int r = ec->AllowWeaponTargetCheck(attackerID, attackerWeaponNum, attackerWeaponDefID, kw);
+
+		if (r > result) {
+			result = r;
+			outKeepWatching = kw;
+		} else if (r == result) {
+			outKeepWatching = outKeepWatching || kw;
+		}
 
 		// the call-in may remove itself from the list
 		i += (i < listAllowWeaponTargetCheck.size() && ec == listAllowWeaponTargetCheck[i]);

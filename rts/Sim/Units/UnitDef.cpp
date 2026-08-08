@@ -665,6 +665,8 @@ UnitDef::UnitDef(const LuaTable& udTable, const std::string& unitName, int id)
 		power = 1.0e-3f;
 	}
 
+	defSelfPriorityMult = udTable.GetFloat("defSelfPriorityMult", 1.0f);
+
 	activateWhenBuilt = udTable.GetBool("activateWhenBuilt", false);
 	onoffable = udTable.GetBool("onoffable", false);
 

@@ -45,6 +45,7 @@
 #include "Sim/Units/Scripts/LuaUnitScript.h"
 #include "Sim/Weapons/Weapon.h"
 #include "Sim/Weapons/WeaponDefHandler.h"
+#include "Sim/Units/UnitHandler.h"
 #include "System/EventHandler.h"
 #include "System/creg/SerializeLuaState.h"
 #include "System/FileSystem/FileHandler.h"
@@ -1704,16 +1705,17 @@ bool CSyncedLuaHandle::ShieldPreDamaged(
  * @see Script.SetWatchAllowTarget
  * @see Script.SetWatchWeapon
  */
-int CSyncedLuaHandle::AllowWeaponTargetCheck(unsigned int attackerID, unsigned int attackerWeaponNum, unsigned int attackerWeaponDefID)
+int CSyncedLuaHandle::AllowWeaponTargetCheck(unsigned int attackerID, unsigned int attackerWeaponNum, unsigned int attackerWeaponDefID, bool& outKeepWatching)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	int ret = -1;
+	outKeepWatching = false;
 
 	if (!watchAllowTargetDefs[attackerWeaponDefID])
 		return ret;
 
 	LUA_CALL_IN_CHECK(L, -1);
-	luaL_checkstack(L, 2 + 3 + 1, __func__);
+	luaL_checkstack(L, 2 + 3 + 2, __func__);
 
 	const LuaUtils::ScopedDebugTraceBack dbgTrace(L);
 	static const LuaHashString cmdStr(__func__);
@@ -1725,12 +1727,13 @@ int CSyncedLuaHandle::AllowWeaponTargetCheck(unsigned int attackerID, unsigned i
 	lua_pushnumber(L, attackerWeaponNum + LUA_WEAPON_BASE_INDEX);
 	lua_pushnumber(L, attackerWeaponDefID);
 
-	if (!RunCallInTraceback(L, cmdStr, 3, 1, dbgTrace.GetErrFuncIdx(), false))
+	if (!RunCallInTraceback(L, cmdStr, 3, 2, dbgTrace.GetErrFuncIdx(), false))
 		return ret;
 
-	ret = lua_toint(L, -1);
+	ret = lua_toint(L, -2);
+	outKeepWatching = lua_toboolean(L, -1);
 
-	lua_pop(L, 1);
+	lua_pop(L, 2);
 	return ret;
 }
 
@@ -1763,8 +1766,12 @@ bool CSyncedLuaHandle::AllowWeaponTarget(
 	RECOIL_DETAILED_TRACY_ZONE;
 	bool ret = true;
 
-	if (!watchAllowTargetDefs[attackerWeaponDefID])
-		return ret;
+	if (!watchAllowTargetDefs[attackerWeaponDefID]) {
+		const CUnit* attacker = unitHandler.GetUnit(static_cast<int>(attackerID));
+		if (attacker == nullptr || attackerWeaponNum >= static_cast<unsigned>(attacker->weapons.size()) ||
+		    !attacker->weapons[attackerWeaponNum]->luaWatchTargets)
+			return ret;
+	}
 
 	LUA_CALL_IN_CHECK(L, true);
 	luaL_checkstack(L, 2 + 5 + 2, __func__);
