@@ -311,6 +311,12 @@ void CUnit::PreInit(const UnitLoadParams& params)
 	harvestStorage = unitDef->harvestStorage;
 
 	moveType = MoveTypeFactory::GetMoveType(this, unitDef);
+	// Connect() must run after construction (not from CGroundMoveType's own
+	// ctor) so it virtual-dispatches to the correct most-derived override,
+	// e.g. CBipedAnimMoveType::Connect(); but it also must not run inside
+	// MoveTypeFactory, because this->moveType isn't assigned until the
+	// factory returns.
+	moveType->Connect();
 	script = CUnitScriptFactory::CreateScript(this, unitDef);
 
 	if (unitDef->selfdExpWeaponDef != nullptr)

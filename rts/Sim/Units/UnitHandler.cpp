@@ -18,6 +18,7 @@
 #include "Sim/MoveTypes/MoveType.h"
 #include "Sim/MoveTypes/Systems/GeneralMoveSystem.h"
 #include "Sim/MoveTypes/Systems/GroundMoveSystem.h"
+#include "Sim/MoveTypes/Systems/BipedAnimMoveSystem.h"
 #include "Sim/MoveTypes/Systems/UnitTrapCheckSystem.h"
 #include "Sim/Path/IPathManager.h"
 #include "Sim/Weapons/Weapon.h"
@@ -330,6 +331,7 @@ void CUnitHandler::UpdateUnitMoveTypes()
 	SCOPED_TIMER("Sim::Unit::MoveType");
 
 	GroundMoveSystem::Update();
+	BipedAnimMoveSystem::Update();
 	GeneralMoveSystem::Update();
 	UnitTrapCheckSystem::Update();
 }

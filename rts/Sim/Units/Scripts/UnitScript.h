@@ -98,6 +98,7 @@ public:
 	SCRIPT_TO_LOCALPIECE_FUNC(    float3, GetPiecePos      ,    GetAbsolutePos     )
 	SCRIPT_TO_LOCALPIECE_FUNC( Transform, GetPieceTransform, GetModelSpaceTransform)
 	SCRIPT_TO_LOCALPIECE_FUNC(CMatrix44f, GetPieceMatrix   , GetModelSpaceMatrix   )
+	SCRIPT_TO_LOCALPIECE_FUNC(      bool, IsPieceVisible   , GetScriptVisible      )
 
 	bool GetEmitDirPos(int scriptPieceNum, float3& pos, float3& dir) const {
 		const auto* p = SafeGetPiece(scriptPieceNum);

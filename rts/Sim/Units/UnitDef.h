@@ -184,6 +184,7 @@ public:
 	bool canfly;
 	bool floatOnWater;
 	bool pushResistant;
+	bool useBipedAnimMoveType;  /// if true, use CBipedAnimMoveType instead of CGroundMoveType
 	bool strafeToAttack;  /// should the unit move sideways when it can't shoot?
 	bool stopToAttack;
 	float minCollisionSpeed;

@@ -18,6 +18,9 @@ ALIAS_COMPONENT(GeneralMoveType, int);
 // Special multi-thread ground move type.
 ALIAS_COMPONENT(GroundMoveType, int);
 
+// Special multi-thread animation-driven bipedal move type.
+ALIAS_COMPONENT(BipedAnimMoveType, int);
+
 // Used by units that have updated the ground collision map and may have trapped units as a result.
 // This is used to allow such a situation to be detected immediately. The fall-back checks are too
 // slow in practice.
@@ -36,7 +39,7 @@ void serialize(Archive &ar, UnitTrapCheck &c) { ar(c.type, c.id); }
 template<class Archive, class Snapshot>
 void serializeComponents(Archive &archive, Snapshot &snapshot) {
     snapshot.template component
-        < GeneralMoveType, GroundMoveType, UnitTrapCheck
+        < GeneralMoveType, GroundMoveType, BipedAnimMoveType, UnitTrapCheck
         >(archive);
 }
 

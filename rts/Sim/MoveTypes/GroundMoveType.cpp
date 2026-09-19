@@ -4,6 +4,7 @@
 
 #include "GroundMoveType.h"
 #include "MoveDefHandler.h"
+#include "BipedAnimMoveType.h"
 #include "Components/MoveTypesComponents.h"
 #include "ExternalAI/EngineOutHandler.h"
 #include "Game/Camera.h"
@@ -534,7 +535,12 @@ CGroundMoveType::CGroundMoveType(CUnit* owner):
 	owner->xsize = md->xsize;
 	owner->zsize = md->zsize;
 
-	Connect();
+	// NOTE: Connect() is virtual and must NOT be called from here: while this
+	// constructor body is running, any derived part (e.g. CBipedAnimMoveType)
+	// hasn't been constructed yet, so a virtual call here always binds to
+	// CGroundMoveType::Connect(), never an override, regardless of the
+	// object's final type. Callers must invoke Connect() themselves once
+	// construction has fully completed (see MoveTypeFactory::GetMoveType()).
 }
 
 CGroundMoveType::~CGroundMoveType()
@@ -675,6 +681,12 @@ void CGroundMoveType::UpdatePreCollisions()
 		return;
 	}
 
+	CommitOwnerSpeed();
+}
+
+void CGroundMoveType::CommitOwnerSpeed()
+{
+	RECOIL_DETAILED_TRACY_ZONE;
 	reversing = UpdateOwnerSpeed(math::fabs(oldSpeed), math::fabs(newSpeed), newSpeed);
 	oldSpeed = newSpeed = 0.f;
 }
@@ -722,6 +734,7 @@ void CGroundMoveType::UpdateCollisionDetections() {
 bool CGroundMoveType::Update()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
+	LOG_L(L_WARNING, "[%s] GroundMoveType (base) ::Update running for unit %i", __func__, owner->id);
 	if (owner->requestRemoveUnloadTransportId) {
 		owner->unloadingTransportId = -1;
 		owner->requestRemoveUnloadTransportId = false;
@@ -1445,7 +1458,10 @@ void CGroundMoveType::ChangeHeading(short newHeading) {
 	#endif
 	const short absDeltaHeading = rawDeltaHeading * Sign(rawDeltaHeading);
 
-	if (absDeltaHeading >= minScriptChangeHeading)
+	// Biped gait drives heading from animation, not the other way around;
+	// telling the script about a heading change here just makes it fight the
+	// animation system for the same pieces.
+	if (absDeltaHeading >= minScriptChangeHeading && dynamic_cast<CBipedAnimMoveType*>(this) == nullptr)
 		owner->script->ChangeHeading(rawDeltaHeading);
 
 	owner->AddHeading(rawDeltaHeading, !owner->upright && owner->IsOnGround(), owner->IsInAir(), owner->unitDef->upDirSmoothing);
@@ -3103,6 +3119,9 @@ void CGroundMoveType::LeaveTransport()
 
 void CGroundMoveType::Connect() {
 	RECOIL_DETAILED_TRACY_ZONE;
+	LOG_L(L_WARNING, "[%s] GroundMoveType (base) connecting unit %i", __func__, owner->id);
+	if (dynamic_cast<CBipedAnimMoveType*>(this) != nullptr)
+		LOG_L(L_ERROR, "[%s] BUG: base Connect() invoked on a CBipedAnimMoveType instance, unit %i", __func__, owner->id);
 	Sim::registry.emplace_or_replace<GroundMoveType>(owner->entityReference, owner->id);
 	Sim::registry.emplace_or_replace<FeatureCollisionEvents>(owner->entityReference);
 	Sim::registry.emplace_or_replace<UnitCollisionEvents>(owner->entityReference);

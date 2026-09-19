@@ -19,6 +19,7 @@
 #include "Sim/Misc/LosHandler.h"
 #include "Sim/Misc/TeamHandler.h"
 #include "Sim/MoveTypes/AAirMoveType.h"
+#include "Sim/MoveTypes/BipedAnimMoveType.h"
 #include "Sim/MoveTypes/GroundMoveType.h"
 #include "Sim/MoveTypes/MoveDefHandler.h"
 #include "Sim/MoveTypes/MoveType.h"
@@ -1115,6 +1116,9 @@ int CUnitScript::GetUnitVal(int val, int p1, int p2, int p3, int p4)
 	case VETERAN_LEVEL:
 		return int(100 * unit->experience);
 	case CURRENT_SPEED:
+		// biped anim units gait off a wanted-speed fraction, not instantaneous speed (use GetUnitVelocity for that)
+		if (const auto* mt = dynamic_cast<const CBipedAnimMoveType*>(unit->moveType))
+			return int(100.0f * mt->GetWantedSpeedFraction());
 		return int(unit->speed.w * COBSCALE);
 	case ON_ROAD:
 		return 0;

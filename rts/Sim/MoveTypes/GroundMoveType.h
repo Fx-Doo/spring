@@ -53,6 +53,16 @@ public:
 	// thread.
 	void UpdatePreCollisions();
 
+	// Tail of UpdatePreCollisions(): commits oldSpeed/newSpeed (as set by
+	// UpdateUnitPosition()'s ChangeSpeed() ramp) via UpdateOwnerSpeed(),
+	// triggering script StartMoving()/StopMoving(). Virtual because
+	// CBipedAnimMoveType replaces UpdateUnitPosition() with
+	// UpdateAnimUnitPosition(), which never touches oldSpeed/newSpeed, and
+	// instead does its own UpdateOwnerSpeed() call in Update() from realized
+	// (not ramped) speed; letting this base version also run would stomp
+	// currentSpeed with the always-zero oldSpeed/newSpeed before that.
+	virtual void CommitOwnerSpeed();
+
 	// Carry out unit collision detections and resolution. Actual movement will be carried in Update() later because
 	// moving units will impact further collisions during these checks. All collision events have to be recorded in the
 	// appropriate GroundMoveSystemComponent event list for the current thread. These events will be issued afterwards,
@@ -203,7 +213,10 @@ public:
     void SetMainHeading();
     void ChangeSpeed(float, bool, bool = false);
 	void ChangeHeading(short newHeading);
-private:
+protected:
+	// Exposed (rather than kept private) so CBipedAnimMoveType can reuse the
+	// terrain/static-object legality filter (UpdatePos) and the realized-speed
+	// bookkeeping (UpdateOwnerSpeed) instead of duplicating them.
 	void UpdateSkid();
 	void UpdateControlledDrop();
 	void CheckCollisionSkid();
@@ -220,7 +233,7 @@ private:
 	bool WantReverse(const float3& wpDir, const float3& ffDir) const;
 	void SetWaypointDir(const float3& cwp, const float3 &opos);
 
-private:
+protected:
 	GMTDefaultPathController pathController;
 
 	int jobId = 0;

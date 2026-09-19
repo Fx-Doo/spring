@@ -46,6 +46,7 @@
 #include "Sim/Misc/QuadField.h"
 #include "Sim/Misc/Wind.h"
 #include "Sim/MoveTypes/AAirMoveType.h"
+#include "Sim/MoveTypes/BipedAnimMoveType.h"
 #include "Sim/Path/IPathManager.h"
 #include "Sim/Projectiles/ExplosionGenerator.h"
 #include "Sim/Projectiles/Projectile.h"
@@ -187,6 +188,7 @@ bool LuaSyncedCtrl::PushEntries(lua_State* L)
 	REGISTER_LUA_CFUNC(CreateFeatureWreck);
 
 	REGISTER_LUA_CFUNC(SetUnitCosts);
+	REGISTER_LUA_CFUNC(SetUnitAnchorPieces);
 	REGISTER_LUA_CFUNC(SetUnitResourcing);
 	REGISTER_LUA_CFUNC(SetUnitStorage);
 	REGISTER_LUA_CFUNC(SetUnitTooltip);
@@ -2139,6 +2141,52 @@ int LuaSyncedCtrl::SetUnitCosts(lua_State* L)
 	}
 
 	return 0;
+}
+
+
+/***
+ * @function Spring.SetUnitAnchorPieces
+ * @param unitID integer
+ * @param pieces table<number,number> array of piece numbers that may act as stance anchors for animation-driven locomotion (CBipedAnimMoveType). Which of these are *active* on any given frame is derived from piece visibility (hide/show), not from this list.
+ * @return boolean success `false` if unitID is invalid or its movetype does not support anchor-driven locomotion.
+ */
+int LuaSyncedCtrl::SetUnitAnchorPieces(lua_State* L)
+{
+	CUnit* unit = ParseUnit(L, __func__, 1);
+
+	if (unit == nullptr) {
+		lua_pushboolean(L, false);
+		return 1;
+	}
+
+	CBipedAnimMoveType* moveType = dynamic_cast<CBipedAnimMoveType*>(unit->moveType);
+
+	if (moveType == nullptr) {
+		lua_pushboolean(L, false);
+		return 1;
+	}
+
+	if (!lua_istable(L, 2))
+		luaL_error(L, "Incorrect arguments to SetUnitAnchorPieces");
+
+	std::vector<int> pieces;
+
+	constexpr int tableIdx = 2;
+	int n = 1;
+	lua_rawgeti(L, tableIdx, n);
+
+	while (lua_israwnumber(L, -1)) {
+		pieces.push_back(lua_toint(L, -1) - 1);
+		lua_pop(L, 1);
+		lua_rawgeti(L, tableIdx, ++n);
+	}
+
+	lua_pop(L, 1);
+
+	moveType->SetAnchorPieceCandidates(std::move(pieces));
+
+	lua_pushboolean(L, true);
+	return 1;
 }
 
 

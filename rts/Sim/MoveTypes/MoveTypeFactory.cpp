@@ -4,6 +4,7 @@
 #include "StrafeAirMoveType.h"
 #include "HoverAirMoveType.h"
 #include "GroundMoveType.h"
+#include "BipedAnimMoveType.h"
 #include "StaticMoveType.h"
 #include "ScriptMoveType.h"
 
@@ -23,6 +24,7 @@ void MoveTypeFactory::InitStatic() {
 AMoveType* MoveTypeFactory::GetMoveType(CUnit* unit, const UnitDef* ud) {
 	RECOIL_DETAILED_TRACY_ZONE;
 	static_assert(sizeof(CGroundMoveType) <= sizeof(unit->amtMemBuffer), "");
+	static_assert(sizeof(CBipedAnimMoveType) <= sizeof(unit->amtMemBuffer), "");
 	static_assert(sizeof(CScriptMoveType) <= sizeof(unit->smtMemBuffer), "");
 
 	if (ud->IsGroundUnit()) {
@@ -32,6 +34,9 @@ AMoveType* MoveTypeFactory::GetMoveType(CUnit* unit, const UnitDef* ud) {
 		assert(unit->moveDef == nullptr);
 
 		unit->moveDef = moveDefHandler.GetMoveDefByPathType(ud->pathType);
+
+		if (ud->useBipedAnimMoveType)
+			return (new (unit->amtMemBuffer) CBipedAnimMoveType(unit));
 
 		return (new (unit->amtMemBuffer) CGroundMoveType(unit));
 	}

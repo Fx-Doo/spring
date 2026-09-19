@@ -14,6 +14,7 @@
 #include "System/EventHandler.h"
 #include "System/TimeProfiler.h"
 #include "System/Threading/ThreadPool.h"
+#include "System/Log/ILog.h"
 
 using namespace MoveTypes;
 
@@ -40,8 +41,13 @@ void GroundMoveSystem::Update() {
             auto unitId = view.get<GroundMoveType>(entity);
 
             CUnit* unit = unitHandler.GetUnit(unitId.value);
+            if (unit == nullptr) {
+                LOG_L(L_ERROR, "[%s] GroundMoveType entity has stale unit id %i (GetUnit returned null)", __func__, unitId.value);
+                return;
+            }
 			CGroundMoveType* moveType = static_cast<CGroundMoveType*>(unit->moveType);
             assert(moveType != nullptr);
+            LOG_L(L_WARNING, "[%s] GroundMoveSystem processing unit %i", __func__, unitId.value);
 
             #ifndef NDEBUG
 			unit->SanityCheck();
@@ -54,11 +60,15 @@ void GroundMoveSystem::Update() {
 		SCOPED_TIMER("Sim::Unit::MoveType::2::UpdatePreCollisions");
 
         // These two sections are ST due to the numerous synced vars being changed.
+        // Filtered by the GroundMoveType tag too: ChangeHeadingEvent/ChangeMainHeadingEvent
+        // are also carried by other movetypes (e.g. CBipedAnimMoveType) that share this
+        // event component type but must not be touched via a CGroundMoveType* static_cast.
         {
-            auto view = Sim::registry.view<ChangeHeadingEvent>();
-            view.each([](ChangeHeadingEvent& event){
+            auto view = Sim::registry.view<GroundMoveType, ChangeHeadingEvent>();
+            view.each([](GroundMoveType& unitId, ChangeHeadingEvent& event){
                 if (event.changed) {
-                    CUnit* unit = unitHandler.GetUnit(event.unitId);
+                    CUnit* unit = unitHandler.GetUnit(unitId.value);
+                    if (unit == nullptr) { event.changed = false; return; }
                     CGroundMoveType* moveType = static_cast<CGroundMoveType*>(unit->moveType);
                     moveType->ChangeHeading(event.deltaHeading);
                     event.changed = false;
@@ -66,10 +76,11 @@ void GroundMoveSystem::Update() {
             });
         }
         {
-            auto view = Sim::registry.view<ChangeMainHeadingEvent>();
-            view.each([](ChangeMainHeadingEvent& event){
+            auto view = Sim::registry.view<GroundMoveType, ChangeMainHeadingEvent>();
+            view.each([](GroundMoveType& unitId, ChangeMainHeadingEvent& event){
                 if (event.changed) {
-                    CUnit* unit = unitHandler.GetUnit(event.unitId);
+                    CUnit* unit = unitHandler.GetUnit(unitId.value);
+                    if (unit == nullptr) { event.changed = false; return; }
                     CGroundMoveType* moveType = static_cast<CGroundMoveType*>(unit->moveType);
                     moveType->SetMainHeading();
                     event.changed = false;
@@ -84,6 +95,7 @@ void GroundMoveSystem::Update() {
             auto unitId = view.get<GroundMoveType>(entity);
 
             CUnit* unit = unitHandler.GetUnit(unitId.value);
+			if (unit == nullptr) return;
 			CGroundMoveType* moveType = static_cast<CGroundMoveType*>(unit->moveType);
             assert(moveType != nullptr);
 
@@ -92,6 +104,7 @@ void GroundMoveSystem::Update() {
 
 		view.each([](GroundMoveType& unitId){
 			CUnit* unit = unitHandler.GetUnit(unitId.value);
+			if (unit == nullptr) return;
 			CGroundMoveType* moveType = static_cast<CGroundMoveType*>(unit->moveType);
             assert(moveType != nullptr);
 
@@ -116,6 +129,7 @@ void GroundMoveSystem::Update() {
             auto unitId = view.get<GroundMoveType>(entity);
 
             CUnit* unit = unitHandler.GetUnit(unitId.value);
+            if (unit == nullptr) return;
             CGroundMoveType* moveType = static_cast<CGroundMoveType*>(unit->moveType);
             assert(moveType != nullptr);
 
@@ -152,6 +166,7 @@ void GroundMoveSystem::Update() {
         auto view = Sim::registry.view<GroundMoveType>();
         view.each([&view](GroundMoveType& unitId){
             CUnit* unit = unitHandler.GetUnit(unitId.value);
+            if (unit == nullptr) return;
             CGroundMoveType* moveType = static_cast<CGroundMoveType*>(unit->moveType);
             assert(moveType != nullptr);
             if (moveType->Update()) 

@@ -435,6 +435,7 @@ UnitDef::UnitDef(const LuaTable& udTable, const std::string& unitName, int id)
 	groundFrictionCoefficient = udTable.GetFloat("groundFrictionCoefficient", 0.01f);
 	atmosphericDragCoefficient = udTable.GetFloat("atmosphericDragCoefficient", 1.0f);
 	pushResistant = udTable.GetBool("pushResistant", false);
+	useBipedAnimMoveType = udTable.GetBool("useBipedAnimMoveType", false);
 	selfDCountdown = udTable.GetInt("selfDestructCountdown", 5);
 
 	/* Note that the legacy unit is elmo/frame

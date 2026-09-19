@@ -3,6 +3,7 @@
 #ifndef UNIT_H
 #define UNIT_H
 
+#include <algorithm>
 #include <vector>
 
 #include "Sim/Objects/SolidObject.h"
@@ -16,6 +17,7 @@
 
 // for amtMemBuffer
 #include "Sim/MoveTypes/GroundMoveType.h"
+#include "Sim/MoveTypes/BipedAnimMoveType.h"
 
 // for smtMemBuffer
 #include "Sim/MoveTypes/ScriptMoveType.h"
@@ -301,9 +303,9 @@ public:
 
 	// sufficient for the largest UnitScript (CLuaUnitScript)
 	uint8_t usMemBuffer[sizeof(CLuaUnitScript)];
-	// sufficient for the largest AMoveType (CGroundMoveType)
+	// sufficient for the largest AMoveType (CGroundMoveType or CBipedAnimMoveType)
 	// need two buffers since ScriptMoveType might be enabled
-	uint8_t amtMemBuffer[sizeof(CGroundMoveType)];
+	uint8_t amtMemBuffer[std::max(sizeof(CGroundMoveType), sizeof(CBipedAnimMoveType))];
 	uint8_t smtMemBuffer[sizeof(CScriptMoveType)];
 	// sufficient for the largest CommandAI type (CBuilderCAI)
 	// knowing the exact CAI object size here is not required;
